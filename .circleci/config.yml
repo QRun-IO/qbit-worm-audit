@@ -1,0 +1,9 @@
+version: 2.1
+
+orbs:
+   qqq-orb: kingsrook/qqq-orb@0.5.0
+
+workflows:
+   build:
+      jobs:
+         - qqq-orb/mvn_test
