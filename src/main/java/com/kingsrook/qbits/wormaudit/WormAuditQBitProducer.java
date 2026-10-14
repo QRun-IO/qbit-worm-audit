@@ -21,14 +21,28 @@
 package com.kingsrook.qbits.wormaudit;
 
 
+import com.kingsrook.qbits.wormaudit.ddl.WormAuditDdl;
+import com.kingsrook.qbits.wormaudit.guard.AppendOnlyGuard;
+import com.kingsrook.qbits.wormaudit.model.LinkRangeWidget;
+import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
+import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
+import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.metadata.MetaDataProducerMultiOutput;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
+import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
+import com.kingsrook.qqq.backend.core.model.metadata.dashboard.QWidgetMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.layout.QAppMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.layout.QAppSection;
+import com.kingsrook.qqq.backend.core.model.metadata.layout.QIcon;
+import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValueSource;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaDataProducer;
+import com.kingsrook.qqq.backend.core.model.metadata.scheduleing.quartz.QuartzSchedulerMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
 
 
 /*******************************************************************************
- ** Entry point for the WORM audit qbit; no tables are produced yet.
+ ** Produces append-only audit metadata, verification actions and schedules.
  *******************************************************************************/
 public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBitConfig>
 {
@@ -108,13 +122,92 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
 
 
    /*******************************************************************************
-    ** Register this qbit and return its metadata, without producing tables.
+    ** Register phase (a) tables, processes and schedules on the host backend.
     *******************************************************************************/
    @Override
-   public MetaDataProducerMultiOutput produce(QInstance qInstance)
+   public MetaDataProducerMultiOutput produce(QInstance qInstance) throws QException
    {
+      qBitConfig.validate();
+      if(qInstance.getBackend(qBitConfig.getBackendName()) == null)
+      {
+         throw (new IllegalArgumentException("Configured audit backend is missing"));
+      }
+      WormAuditDdl.resolveNames(qBitConfig, qInstance);
+      for(String core : AppendOnlyGuard.CORE_TABLES)
+      {
+         if(!qBitConfig.getBackendName().equals(qInstance.getTable(core).getBackendName()))
+         {
+            throw (new IllegalArgumentException("Core and WORM audit tables must share one backend"));
+         }
+      }
       QBitMetaData qBit = getQBitMetaData();
-      qInstance.addQBit(qBit);
-      return (new MetaDataProducerMultiOutput().with(qBit));
+      MetaDataProducerMultiOutput output = new MetaDataProducerMultiOutput().with(qBit);
+      AppendOnlyGuard guard = new AppendOnlyGuard();
+      for(QTableMetaData table : WormAuditTables.tables(qBitConfig))
+      {
+         if(qBitConfig.getTableMetaDataCustomizer() != null)
+         {
+            table = qBitConfig.getTableMetaDataCustomizer().customizeMetaData(qInstance, table);
+         }
+         guard.customizeMetaData(qInstance, table);
+         table.setSourceQBitName(qBit.getName());
+         output.add(table);
+      }
+      for(String core : AppendOnlyGuard.CORE_TABLES)
+      {
+         guard.customizeMetaData(qInstance, qInstance.getTable(core));
+      }
+      for(String name : WormAuditTables.ALL)
+      {
+         output.add(QPossibleValueSource.newForTable(name));
+      }
+      for(String name : java.util.List.of(WormAuditTables.CHECKPOINT, WormAuditTables.EXPORT, WormAuditTables.VERIFICATION))
+      {
+         output.add(new QWidgetMetaData().withName(name + "_links").withLabel("Chain links").withType("childRecordList")
+            .withCodeReference(new QCodeReference(LinkRangeWidget.class)).withDefaultValue("parentTable", name));
+      }
+      for(var process : WormAuditProcesses.processes(qBitConfig))
+      {
+         process.setSourceQBitName(qBit.getName());
+         output.add(process);
+      }
+      if(qInstance.getSchedulers() == null || !qInstance.getSchedulers().containsKey(qBitConfig.getSchedulerName()))
+      {
+         qInstance.addScheduler(new QuartzSchedulerMetaData().withName(qBitConfig.getSchedulerName()));
+      }
+      QAppMetaData app = new QAppMetaData().withName("worm_audit").withLabel("WORM Audit").withIcon(new QIcon("policy"));
+      for(String name : WormAuditTables.NAV)
+      {
+         QTableMetaData table = output.getEach(QTableMetaData.class).stream().filter(t -> t.getName().equals(name)).findFirst().orElseThrow();
+         app.withSectionOfChildren(new QAppSection().withName(name).withLabel(table.getLabel()), table);
+      }
+      output.add(app);
+      // RC.5 rejects underscores in declared alert type names. QAlerts still
+      // dispatches the specified worm_audit.chain.break signal to installed sinks.
+      output.addSelfToInstance(qInstance);
+      denyAssistant(qInstance);
+      return (new MetaDataProducerMultiOutput());
+   }
+
+
+   /*******************************************************************************
+    ** RC.5 compatibility: replace with a direct call when the qbit builds on RC.6 (qqq#1141, #1163).
+    *******************************************************************************/
+   private void denyAssistant(QInstance instance) throws QException
+   {
+      try
+      {
+         Class<?> type = Class.forName("com.kingsrook.qqq.backend.core.model.metadata.permissions.ClientChannelsMetaData");
+         Object metadata = type.getMethod("ofOrWithNew", QInstance.class).invoke(null, instance);
+         type.getMethod("withDeniedPattern", String.class, String.class).invoke(metadata, "assistant", "worm_audit_*");
+      }
+      catch(ClassNotFoundException expected)
+      {
+         // The assistant wall API is absent in RC.5.
+      }
+      catch(ReflectiveOperationException e)
+      {
+         throw (new QException("Cannot register the WORM audit assistant deny pattern", e));
+      }
    }
 }

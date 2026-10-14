@@ -21,25 +21,314 @@
 package com.kingsrook.qbits.wormaudit;
 
 
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.util.Map;
+import java.util.function.Supplier;
 import com.kingsrook.qqq.backend.core.model.metadata.producers.MetaDataCustomizerInterface;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitConfig;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
 
 
 /*******************************************************************************
- ** Configuration for the WORM audit qbit.
+ ** Host configuration. Private signing material never enters metadata records.
  *******************************************************************************/
 public class WormAuditQBitConfig implements QBitConfig
 {
    public static final int DEFAULT_RETENTION_YEARS = 6;
 
-   private MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer;
-   private int retentionYears = DEFAULT_RETENTION_YEARS;
+   /*******************************************************************************
+    ** Signing identity; the matching public key must be pinned in trustedPublicKeys.
+    *******************************************************************************/
+   public record SigningKey(String keyId, PrivateKey privateKey)
+   {
+   }
 
+   private String backendName = null;
+   private int retentionYears = 6;
+   private Supplier<SigningKey> signingKey = null;
+   private Map<String, PublicKey> trustedPublicKeys = Map.of();
+   private int chainIntervalSeconds = 30;
+   private int settleHorizonSeconds = 60;
+   private int batchSize = 1000;
+   private int lateDetailLookbackHours = 24;
+   private int checkpointEveryLinks = 10000;
+   private int checkpointEveryMinutes = 60;
+   private String verifyCron = "0 0 3 * * ?";
+   private String schedulerName = "worm_audit";
+   private Map<String, String> coreAuditTableNames = Map.of();
+   private String appRole = "app";
+   private MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer = null;
 
 
    /*******************************************************************************
-    ** Getter for the optional table customizer.
+    ** Read backendName.
+    *******************************************************************************/
+   public String getBackendName()
+   {
+      return (backendName);
+   }
+
+
+   /*******************************************************************************
+    ** Configure backendName.
+    *******************************************************************************/
+   public WormAuditQBitConfig withBackendName(String backendName)
+   {
+      this.backendName = backendName;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read retentionYears.
+    *******************************************************************************/
+   public int getRetentionYears()
+   {
+      return (retentionYears);
+   }
+
+
+   /*******************************************************************************
+    ** Configure retentionYears.
+    *******************************************************************************/
+   public WormAuditQBitConfig withRetentionYears(int retentionYears)
+   {
+      this.retentionYears = retentionYears;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read signingKey.
+    *******************************************************************************/
+   public Supplier<SigningKey> getSigningKey()
+   {
+      return (signingKey);
+   }
+
+
+   /*******************************************************************************
+    ** Configure signingKey.
+    *******************************************************************************/
+   public WormAuditQBitConfig withSigningKey(Supplier<SigningKey> signingKey)
+   {
+      this.signingKey = signingKey;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read trustedPublicKeys.
+    *******************************************************************************/
+   public Map<String, PublicKey> getTrustedPublicKeys()
+   {
+      return (trustedPublicKeys);
+   }
+
+
+   /*******************************************************************************
+    ** Configure trustedPublicKeys.
+    *******************************************************************************/
+   public WormAuditQBitConfig withTrustedPublicKeys(Map<String, PublicKey> trustedPublicKeys)
+   {
+      this.trustedPublicKeys = trustedPublicKeys;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read chainIntervalSeconds.
+    *******************************************************************************/
+   public int getChainIntervalSeconds()
+   {
+      return (chainIntervalSeconds);
+   }
+
+
+   /*******************************************************************************
+    ** Configure chainIntervalSeconds.
+    *******************************************************************************/
+   public WormAuditQBitConfig withChainIntervalSeconds(int chainIntervalSeconds)
+   {
+      this.chainIntervalSeconds = chainIntervalSeconds;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read settleHorizonSeconds.
+    *******************************************************************************/
+   public int getSettleHorizonSeconds()
+   {
+      return (settleHorizonSeconds);
+   }
+
+
+   /*******************************************************************************
+    ** Configure settleHorizonSeconds.
+    *******************************************************************************/
+   public WormAuditQBitConfig withSettleHorizonSeconds(int settleHorizonSeconds)
+   {
+      this.settleHorizonSeconds = settleHorizonSeconds;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the bounded late-detail polling window in hours.
+    *******************************************************************************/
+   public int getLateDetailLookbackHours()
+   {
+      return (lateDetailLookbackHours);
+   }
+
+
+   /*******************************************************************************
+    ** Configure late-detail polling; older omissions are reported by verification.
+    *******************************************************************************/
+   public WormAuditQBitConfig withLateDetailLookbackHours(int lateDetailLookbackHours)
+   {
+      this.lateDetailLookbackHours = lateDetailLookbackHours;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read batchSize.
+    *******************************************************************************/
+   public int getBatchSize()
+   {
+      return (batchSize);
+   }
+
+
+   /*******************************************************************************
+    ** Configure batchSize.
+    *******************************************************************************/
+   public WormAuditQBitConfig withBatchSize(int batchSize)
+   {
+      this.batchSize = batchSize;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read checkpointEveryLinks.
+    *******************************************************************************/
+   public int getCheckpointEveryLinks()
+   {
+      return (checkpointEveryLinks);
+   }
+
+
+   /*******************************************************************************
+    ** Configure checkpointEveryLinks.
+    *******************************************************************************/
+   public WormAuditQBitConfig withCheckpointEveryLinks(int checkpointEveryLinks)
+   {
+      this.checkpointEveryLinks = checkpointEveryLinks;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read checkpointEveryMinutes.
+    *******************************************************************************/
+   public int getCheckpointEveryMinutes()
+   {
+      return (checkpointEveryMinutes);
+   }
+
+
+   /*******************************************************************************
+    ** Configure checkpointEveryMinutes.
+    *******************************************************************************/
+   public WormAuditQBitConfig withCheckpointEveryMinutes(int checkpointEveryMinutes)
+   {
+      this.checkpointEveryMinutes = checkpointEveryMinutes;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read verifyCron.
+    *******************************************************************************/
+   public String getVerifyCron()
+   {
+      return (verifyCron);
+   }
+
+
+   /*******************************************************************************
+    ** Configure verifyCron.
+    *******************************************************************************/
+   public WormAuditQBitConfig withVerifyCron(String verifyCron)
+   {
+      this.verifyCron = verifyCron;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read schedulerName.
+    *******************************************************************************/
+   public String getSchedulerName()
+   {
+      return (schedulerName);
+   }
+
+
+   /*******************************************************************************
+    ** Configure schedulerName.
+    *******************************************************************************/
+   public WormAuditQBitConfig withSchedulerName(String schedulerName)
+   {
+      this.schedulerName = schedulerName;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read coreAuditTableNames.
+    *******************************************************************************/
+   public Map<String, String> getCoreAuditTableNames()
+   {
+      return (coreAuditTableNames);
+   }
+
+
+   /*******************************************************************************
+    ** Configure coreAuditTableNames.
+    *******************************************************************************/
+   public WormAuditQBitConfig withCoreAuditTableNames(Map<String, String> coreAuditTableNames)
+   {
+      this.coreAuditTableNames = coreAuditTableNames;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read appRole.
+    *******************************************************************************/
+   public String getAppRole()
+   {
+      return (appRole);
+   }
+
+
+   /*******************************************************************************
+    ** Configure appRole.
+    *******************************************************************************/
+   public WormAuditQBitConfig withAppRole(String appRole)
+   {
+      this.appRole = appRole;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read tableMetaDataCustomizer.
     *******************************************************************************/
    @Override
    public MetaDataCustomizerInterface<QTableMetaData> getTableMetaDataCustomizer()
@@ -48,9 +337,8 @@ public class WormAuditQBitConfig implements QBitConfig
    }
 
 
-
    /*******************************************************************************
-    ** Fluent setter for the optional table customizer.
+    ** Configure tableMetaDataCustomizer.
     *******************************************************************************/
    public WormAuditQBitConfig withTableMetaDataCustomizer(MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer)
    {
@@ -59,23 +347,15 @@ public class WormAuditQBitConfig implements QBitConfig
    }
 
 
-
    /*******************************************************************************
-    ** Getter for the audit retention in years (HIPAA default: 6).
+    ** Reject invalid runtime limits before producing metadata.
     *******************************************************************************/
-   public int getRetentionYears()
+   public void validate()
    {
-      return (retentionYears);
-   }
-
-
-
-   /*******************************************************************************
-    ** Fluent setter for the audit retention in years.
-    *******************************************************************************/
-   public WormAuditQBitConfig withRetentionYears(int retentionYears)
-   {
-      this.retentionYears = retentionYears;
-      return (this);
+      if(backendName == null || backendName.isBlank() || retentionYears < 1 || chainIntervalSeconds < 1
+         || lateDetailLookbackHours < 1 || settleHorizonSeconds < 0 || batchSize < 1 || checkpointEveryLinks < 1 || checkpointEveryMinutes < 1)
+      {
+         throw (new IllegalArgumentException("backendName is required and WORM audit limits must be positive (settle horizon may be zero)"));
+      }
    }
 }

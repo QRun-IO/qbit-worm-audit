@@ -20,71 +20,144 @@
 
 package com.kingsrook.qbits.wormaudit;
 
-
-import com.kingsrook.qqq.backend.core.model.metadata.MetaDataProducerMultiOutput;
+import java.util.List;
+import com.kingsrook.qbits.wormaudit.ddl.WormAuditDdl;
+import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
+import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
-import com.kingsrook.qqq.backend.core.model.metadata.producers.MetaDataCustomizerInterface;
-import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaData;
-import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.tables.Capability;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
-
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /*******************************************************************************
- ** Verify the scaffold's registration and configuration contract.
+ ** Tests and fixtures for worm audit qbit producer test.
  *******************************************************************************/
 class WormAuditQBitProducerTest
 {
    /*******************************************************************************
-    ** Produce the identity and exact config into an otherwise empty instance.
+    ** Verify metadata and defaults.
     *******************************************************************************/
    @Test
-   void producesQBitWithoutTables()
+   void metadataAndDefaults() throws Exception
    {
-      QInstance instance = new QInstance();
-      WormAuditQBitConfig config = new WormAuditQBitConfig();
-      WormAuditQBitProducer producer = new WormAuditQBitProducer().withQBitConfig(config);
-      MetaDataProducerMultiOutput output = producer.produce(instance);
-      QBitMetaData qBit = instance.getQBits().get("com.kingsrook.qbits:qbit-worm-audit");
-
-      assertThat(qBit).isNotNull();
-      assertThat(qBit.getGroupId()).isEqualTo("com.kingsrook.qbits");
-      assertThat(qBit.getArtifactId()).isEqualTo("qbit-worm-audit");
-      assertThat(qBit.getVersion()).isEqualTo("0.1.0");
-      assertThat(qBit.getConfig()).isSameAs(config);
-      assertThat(producer.getQBitConfig()).isSameAs(config);
-      assertThat(producer.isEnabled()).isTrue();
-      assertThat(producer.getNamespace()).isNull();
-      assertThat(output.getEach(QBitMetaData.class)).containsExactly(qBit);
-      assertThat(output.getEach(QTableMetaData.class)).isEmpty();
-      assertThat(instance.getTables()).isEmpty();
+      var config = new WormAuditQBitConfig();
+      QInstance instance = WormAuditTestSupport.init(config);
       assertThat(config.getRetentionYears()).isEqualTo(6);
       assertThat(config.getTableMetaDataCustomizer()).isNull();
+      assertThat(config.getSigningKey()).isNull();
+      assertThat(config.getTrustedPublicKeys()).isEmpty();
+      assertThat(config.getChainIntervalSeconds()).isEqualTo(30);
+      assertThat(config.getSettleHorizonSeconds()).isEqualTo(60);
+      assertThat(config.getCheckpointEveryLinks()).isEqualTo(10000);
+      assertThat(config.getCheckpointEveryMinutes()).isEqualTo(60);
+      assertThat(config.getBatchSize()).isEqualTo(1000);
+      assertThat(config.getLateDetailLookbackHours()).isEqualTo(24);
+      assertThat(config.getVerifyCron()).isEqualTo("0 0 3 * * ?");
+      assertThat(config.getAppRole()).isEqualTo("app");
+      assertThat(instance.getQBits().get("com.kingsrook.qbits:qbit-worm-audit").getConfig())
+            .isSameAs(config);
+      assertThat(instance.getApp("worm_audit").getSections())
+            .extracting(s -> s.getName())
+            .containsExactlyElementsOf(WormAuditTables.NAV);
+      assertThat(instance.getApp("worm_audit").getChildren())
+            .allMatch(
+                  c ->
+                        c.getName().startsWith("worm_audit_")
+                              && !c.getName().contains("verify"));
+      assertThat(instance.getProcess(WormAuditProcesses.VERIFY).getTableName())
+            .isEqualTo(WormAuditTables.CHAIN);
+      assertThat(instance.getProcess(WormAuditProcesses.CHAIN).getSchedule().getRepeatSeconds())
+            .isEqualTo(30);
+      assertThat(instance.getProcess(WormAuditProcesses.DAILY).getSchedule().getCronExpression())
+            .isEqualTo(config.getVerifyCron());
+      for(String name :
+            List.of(
+                  "audit",
+                  "auditDetail",
+                  "auditUser",
+                  "auditTable",
+                  WormAuditTables.CHAIN,
+                  WormAuditTables.CHECKPOINT,
+                  WormAuditTables.EXPORT,
+                  WormAuditTables.VERIFICATION,
+                  WormAuditTables.PURGE))
+      {
+         var table = instance.getTable(name);
+         assertThat(
+                     table.isCapabilityEnabled(
+                           instance.getBackendForTable(name), Capability.TABLE_UPDATE))
+               .isFalse();
+         assertThat(
+                     table.isCapabilityEnabled(
+                           instance.getBackendForTable(name), Capability.TABLE_DELETE))
+               .isFalse();
+         if(name.startsWith("worm_audit_"))
+         {
+            assertThat(table.getPermissionRules().getPermissionBaseName()).isEqualTo(name);
+            assertThat(
+                        table.isCapabilityEnabled(
+                              instance.getBackendForTable(name), Capability.TABLE_INSERT))
+                  .isFalse();
+            assertThat(table.getSections()).isNotEmpty();
+         }
+      }
    }
 
-
-
    /*******************************************************************************
-    ** Configured instances may be namespaced; unconfigured scanning is disabled.
+    ** Verify customizations and validation.
     *******************************************************************************/
    @Test
-   void supportsNamespacedConfiguration()
+   void customizationsAndValidation() throws Exception
    {
       assertThat(new WormAuditQBitProducer().isEnabled()).isFalse();
-      MetaDataCustomizerInterface<QTableMetaData> customizer = (instance, table) -> table;
-      WormAuditQBitConfig config = new WormAuditQBitConfig()
-         .withTableMetaDataCustomizer(customizer)
-         .withRetentionYears(7);
-      WormAuditQBitProducer producer = new WormAuditQBitProducer()
-         .withQBitConfig(config)
-         .withNamespace("test");
-      QInstance instance = new QInstance();
+      var config =
+            new WormAuditQBitConfig()
+                  .withRetentionYears(7)
+                  .withChainIntervalSeconds(45)
+                  .withSettleHorizonSeconds(0)
+                  .withBatchSize(13)
+                  .withCheckpointEveryLinks(5)
+                  .withCheckpointEveryMinutes(2)
+                  .withVerifyCron("0 1 3 * * ?")
+                  .withAppRole("runtime")
+                  .withSchedulerName("jobs")
+                  .withCoreAuditTableNames(java.util.Map.of("audit", "custom_audit"))
+                  .withTableMetaDataCustomizer(
+                        (instance, table) ->
+                              table.withLabel("custom")
+                                    .withCapabilities(Capability.TABLE_UPDATE));
+      var instance =
+            WormAuditTestSupport.core(
+                  new com.kingsrook.qqq.backend.core.model.metadata.QBackendMetaData()
+                        .withName("memory")
+                        .withBackendType(
+                              com.kingsrook.qqq.backend.core.modules.backend
+                                    .implementations.memory.MemoryBackendModule.class));
+      var producer =
+            new WormAuditQBitProducer()
+                  .withNamespace("test")
+                  .withQBitConfig(config.withBackendName("memory"));
       producer.produce(instance);
-
       assertThat(producer.getNamespace()).isEqualTo("test");
-      assertThat(instance.getQBits().get("com.kingsrook.qbits:qbit-worm-audit:test").getConfig()).isSameAs(config);
-      assertThat(config.getTableMetaDataCustomizer()).isSameAs(customizer);
-      assertThat(config.getRetentionYears()).isEqualTo(7);
-      assertThat(instance.getTables()).isEmpty();
+      assertThat(producer.getQBitConfig()).isSameAs(config);
+      assertThat(producer.isEnabled()).isTrue();
+      assertThat(config.getCoreAuditTableNames()).containsEntry("audit", "custom_audit");
+      assertThat(instance.getTable(WormAuditTables.CHAIN).getLabel()).isEqualTo("custom");
+      assertThat(
+                  instance.getTable(WormAuditTables.CHAIN)
+                        .isCapabilityEnabled(
+                              instance.getBackend("memory"), Capability.TABLE_UPDATE))
+            .isFalse();
+      assertThatThrownBy(() -> new WormAuditQBitConfig().validate())
+            .isInstanceOf(IllegalArgumentException.class);
+      assertThat(config.withLateDetailLookbackHours(48).getLateDetailLookbackHours()).isEqualTo(48);
+      assertThatThrownBy(() -> config.withLateDetailLookbackHours(0).validate()).isInstanceOf(IllegalArgumentException.class);
+      config.withLateDetailLookbackHours(24);
+      assertThatThrownBy(() -> config.withRetentionYears(0).validate())
+            .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(
+                  () -> WormAuditDdl.resolveNames(new WormAuditQBitConfig(), new QInstance()))
+            .isInstanceOf(IllegalArgumentException.class);
    }
 }

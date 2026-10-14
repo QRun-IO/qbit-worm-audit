@@ -27,6 +27,7 @@
       <maven.compiler.target>21</maven.compiler.target>
       <jacoco.version>0.8.15</jacoco.version>
       <h2.version>2.2.224</h2.version>
+      <testcontainers.version>2.0.5</testcontainers.version>
    </properties>
 
    <parent>
@@ -81,7 +82,6 @@
       <dependency>
          <groupId>com.kingsrook.qqq</groupId>
          <artifactId>qqq-backend-module-rdbms</artifactId>
-         <scope>test</scope>
       </dependency>
       <dependency>
          <groupId>com.kingsrook.qqq</groupId>
@@ -97,6 +97,30 @@
          <groupId>com.h2database</groupId>
          <artifactId>h2</artifactId>
          <version>${h2.version}</version>
+         <scope>test</scope>
+      </dependency>
+      <dependency>
+         <groupId>org.postgresql</groupId>
+         <artifactId>postgresql</artifactId>
+         <version>42.7.14</version>
+         <scope>test</scope>
+      </dependency>
+      <dependency>
+         <groupId>org.testcontainers</groupId>
+         <artifactId>testcontainers-postgresql</artifactId>
+         <version>${testcontainers.version}</version>
+         <scope>test</scope>
+      </dependency>
+      <dependency>
+         <groupId>org.testcontainers</groupId>
+         <artifactId>testcontainers-minio</artifactId>
+         <version>${testcontainers.version}</version>
+         <scope>test</scope>
+      </dependency>
+      <dependency>
+         <groupId>org.testcontainers</groupId>
+         <artifactId>testcontainers-junit-jupiter</artifactId>
+         <version>${testcontainers.version}</version>
          <scope>test</scope>
       </dependency>
       <dependency>

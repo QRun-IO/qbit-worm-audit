@@ -18,7 +18,19 @@ Use the Maven 3.9.11 wrapper (Java 21); Maven 3.10 cannot read the parent POM. O
 
 ## Architecture
 
-Package: `com.kingsrook.qbits.wormaudit`. Entry point: `WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBitConfig>`. Config exposes `tableMetaDataCustomizer` and `retentionYears` (default 6).
+Package: `com.kingsrook.qbits.wormaudit`. Entry point: `WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBitConfig>`. Config requires the host `backendName`; core audit tables must exist before production.
+
+- `ddl`: reviewed Liquibase PostgreSQL template and safe renderer; public sidecar tables and owner-only retention purge.
+- `guard`: immutable QQQ capabilities and value-free SQLSTATE mapping.
+- `canonical`, `chain`, `checkpoint`: strict JCS v1, transaction/advisory-locked writer, explicit detail coverage, pinned Ed25519 ranges.
+- `verify`: snapshot checks of content, continuity, coverage and checkpoints, starting at the purge anchor.
+- `processes`: standard streamed ETL action, scheduled chainer and daily QAlerts producer; never app navigation entries.
+- `model`: read-only tables, range record references and standard record child lists. No app-home widgets or export execution in phase (a).
+
+PostgreSQL uses a transaction advisory lock; other backends require a single writer JVM.
+Use `./mvnw.cmd -o verify` offline. PostgreSQL tests skip without Docker locally, but fail whenever `CI` is set.
+Core RC.5 has no assistant deny API (reflective registration) and disallows underscores in declared alert-type metadata;
+signals retain the required `worm_audit.chain.break` name and dispatch through QAlerts without that declaration.
 
 ## Invariants and naming
 
