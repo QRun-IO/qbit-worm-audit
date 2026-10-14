@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+   <Appenders>
+      <Console name="Console" target="SYSTEM_OUT">
+         <!-- Core can emit diagnostic events at OFF; exclude those as well. -->
+         <LevelRangeFilter minLevel="FATAL" maxLevel="WARN" onMatch="NEUTRAL" onMismatch="DENY"/>
+         <PatternLayout pattern="%d{HH:mm:ss} %-5level %logger{36} - %msg%n"/>
+      </Console>
+   </Appenders>
+   <Loggers>
+      <Logger name="org.testcontainers" level="WARN"/>
+      <Logger name="com.github.dockerjava" level="WARN"/>
+      <Logger name="org.apache.hc" level="WARN"/>
+      <Logger name="tc" level="WARN"/>
+      <Root level="WARN"><AppenderRef ref="Console"/></Root>
+   </Loggers>
+</Configuration>
