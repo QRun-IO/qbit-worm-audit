@@ -26,6 +26,7 @@ import com.kingsrook.qbits.wormaudit.app.WormAuditApp;
 import com.kingsrook.qbits.wormaudit.ddl.WormAuditDdl;
 import com.kingsrook.qbits.wormaudit.guard.AppendOnlyGuard;
 import com.kingsrook.qbits.wormaudit.model.LinkRangeWidget;
+import com.kingsrook.qbits.wormaudit.model.WormAuditHelp;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
 import com.kingsrook.qbits.wormaudit.processes.ExportProcesses;
 import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
@@ -43,6 +44,7 @@ import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaDataProducer;
 import com.kingsrook.qqq.backend.core.model.metadata.scheduleing.quartz.QuartzSchedulerMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
+import com.kingsrook.qqq.backend.core.model.session.QSystemUserSession;
 
 
 /*******************************************************************************
@@ -191,9 +193,14 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
       var previousTransaction = QContext.getQBackendTransaction();
       try
       {
-         // Production is still assembling the host metadata. Do not validate it mid-build.
+         ////////////////////////////////////////////////////////////////////////////
+         // Production is still assembling the host metadata. Do not validate it   //
+         // mid-build. The startup settings read is system work: run it as the     //
+         // core system user. A plain tokenless QSession fails session validation  //
+         // under token-based host authentication (OAuth2, Auth0).                 //
+         ////////////////////////////////////////////////////////////////////////////
          QContext.setQInstance(qInstance);
-         QContext.setQSession(new com.kingsrook.qqq.backend.core.model.session.QSession());
+         QContext.setQSession(new QSystemUserSession(qInstance));
          QContext.setTransaction(null);
          addProcesses(output, qBit);
       }
@@ -230,6 +237,7 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
             .withDefaultMonitor(AlertDefaultMonitor.heartbeat(name, name, 24 * 3600, 2 * 3600)));
       }
       output.addSelfToInstance(qInstance);
+      WormAuditHelp.apply(qInstance, qBitConfig);
       denyAssistant(qInstance);
       return (new MetaDataProducerMultiOutput());
    }

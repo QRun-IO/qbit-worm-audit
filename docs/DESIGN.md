@@ -111,6 +111,17 @@ file into their changelog (kof22: `changesets/features/YYYY-MM-DD-worm-audit.sql
 qbit tables, the functions, the triggers, the purger role (`CREATE ROLE ... NOLOGIN` when it is
 missing) and the grants. It is idempotent (`CREATE OR REPLACE`, `DROP TRIGGER IF EXISTS`).
 
+Foreign keys (`worm-audit:11-12`) are `ON DELETE RESTRICT` only, so nothing cascades into or out
+of evidence: `worm_audit_chain.audit_id` -> the core audit header (the purge deletes details, then
+links, then headers, in that order), `worm_audit_export.from/to_checkpoint_id` -> checkpoints and
+`worm_audit_verification.export_id` -> exports (neither is ever deleted). References to chain links
+(checkpoint, export and verification ranges, `first_break_link_id`, the purge anchor) are not
+foreign keys: the purge deletes the sealed prefix those rows outlive. On upgrade, rows whose parent
+is already missing are evidence and are never changed: they are copied to `qqq_fk_quarantine`
+(action `KEPT`) and that constraint stays `NOT VALID` (new rows are still checked). With the
+foreign key, a plain `TRUNCATE` of `audit` (or of checkpoints or exports) is refused by PostgreSQL
+before the guard trigger; `TRUNCATE ... CASCADE` reaches the guards, which refuse it.
+
 ### 4.5 Threat model summary
 
 | Actor | Can modify audit rows? | Detected by |

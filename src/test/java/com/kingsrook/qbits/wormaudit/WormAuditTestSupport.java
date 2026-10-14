@@ -37,7 +37,7 @@ import com.kingsrook.qqq.backend.core.modules.backend.implementations.memory.Mem
 import java.time.Instant;
 import java.util.List;
 
-class WormAuditTestSupport {
+public class WormAuditTestSupport {
     static final Instant OLD = Instant.parse("2020-01-02T03:04:05.123456Z");
     static final AuditStore STORE = new AuditStore(null);
 
@@ -128,6 +128,16 @@ class WormAuditTestSupport {
                                                                         : id)
                                                         .withValue(field, value))),
                         false);
+    }
+
+    /** What the shipped database script does for the singleton: insert row 1 from the host config, only when absent. */
+    public static void seedSettings(WormAuditQBitConfig config) throws Exception {
+        if (STORE.get(com.kingsrook.qbits.wormaudit.model.WormAuditTables.SETTINGS, 1) == null) {
+            STORE.insert(
+                    com.kingsrook.qbits.wormaudit.model.WormAuditTables.SETTINGS,
+                    List.of(WormAuditSettings.defaults(config)));
+        }
+        config.invalidateSettings();
     }
 
     static void remove(String table, long id) throws Exception {

@@ -91,7 +91,14 @@ public class WormAuditSettings
 
    /*******************************************************************************
     ** Seed the singleton only when absent; never overwrite an administrator edit.
+    ** The database script (changeset worm-audit:10) is the normal seed; this remains
+    ** for memory and H2 hosts, whose settings table cannot take generic inserts.
+    **
+    ** @deprecated for PostgreSQL hosts, which get row 1 from the database script;
+    ** still the supported way to create row 1 on memory and H2 hosts. Reads already
+    ** fall back to the configured values while the row is absent.
     *******************************************************************************/
+   @Deprecated
    public static void seed(WormAuditQBitConfig config) throws com.kingsrook.qqq.backend.core.exceptions.QException
    {
       var store = new AuditStore(null);
