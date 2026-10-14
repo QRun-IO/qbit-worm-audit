@@ -110,8 +110,9 @@ absent. Historical checkpoints remain valid after changing their creation cadenc
 
 Changeset `worm-audit:10` creates and seeds the table with `INSERT ... SELECT ... WHERE NOT
 EXISTS`; rerunning it never overwrites an administrator change. The renderer seeds from the
-host config. Memory hosts and the demo can call `WormAuditSettings.seed(config)` for the same
-insert-only behavior during single-threaded startup.
+host config. Memory and H2 hosts, whose settings table cannot take generic inserts, can still call
+`WormAuditSettings.seed(config)` for the same insert-only behavior during single-threaded
+startup (deprecated for PostgreSQL hosts, which get the row from the script).
 
 `audit_retention_years` does **not** rewrite the database purge function. The home warns if
 it differs from the compiled interval; changing that interval requires a reviewed migration.

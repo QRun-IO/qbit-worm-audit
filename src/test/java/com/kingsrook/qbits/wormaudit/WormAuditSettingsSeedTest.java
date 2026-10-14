@@ -40,9 +40,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  ** run on H2; this runs the settings table's CREATE and its seed statement as
  ** the script renders them, on H2 in PostgreSQL mode: the row appears with the
  ** host's values, a second run inserts nothing, and an edit survives.
- ** This is the only seed: WormAuditSettings.seed() was dead code (nothing in
- ** src/main called it) and was removed, because WormAuditSettings.read() already
- ** falls back to the configured values when the row is absent.
+ ** WormAuditSettings.seed() is deprecated (nothing in src/main calls it) but still
+ ** works for memory and H2 hosts; WormAuditSettings.read() falls back to the
+ ** configured values while the row is absent.
  *******************************************************************************/
 class WormAuditSettingsSeedTest
 {
@@ -75,6 +75,23 @@ class WormAuditSettingsSeedTest
          assertThat(scalar(sql, "SELECT COUNT(*) FROM public.worm_audit_settings")).isEqualTo("1");
          assertThat(scalar(sql, "SELECT export_retention_days FROM public.worm_audit_settings")).isEqualTo("90");
       }
+   }
+
+
+
+   /*******************************************************************************
+    ** The deprecated public seed() still creates row 1 once and keeps edits.
+    *******************************************************************************/
+   @Test
+   @SuppressWarnings("deprecation")
+   void deprecatedSeedStillWorksForMemoryHosts() throws Exception
+   {
+      var config = new WormAuditQBitConfig().withRetentionYears(8);
+      WormAuditTestSupport.init(config);
+      WormAuditSettings.seed(config);
+      assertThat(WormAuditTestSupport.STORE.get("worm_audit_settings", 1).getValueInteger("audit_retention_years")).isEqualTo(8);
+      WormAuditSettings.seed(config);
+      assertThat(WormAuditTestSupport.STORE.get("worm_audit_settings", 1)).isNotNull();
    }
 
 
