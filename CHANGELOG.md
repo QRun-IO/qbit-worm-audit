@@ -6,8 +6,8 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 
 ### Added
 
+- Foreign keys (`worm-audit:11-12`), `ON DELETE RESTRICT` only: chain link -> core audit header, sealed export -> its first and last checkpoints, export verification -> its export, with their indexes. Link references (ranges, break link, purge anchor) stay unconstrained because the retention purge deletes the links they outlive. Pre-existing orphans are copied to `qqq_fk_quarantine` (`KEPT`), never modified, and leave that constraint `NOT VALID`. Re-apply the rendered DDL (idempotent).
 - Guided empty states: `help/qbit-worm-audit.yaml` (QQQ help-bundle format) gives the app and all six tables a summary and a "How rows get created" section, applied by the `WormAuditHelp` stand-in (`STAND-IN(core=QRun-IO/qqq#1198, removeBy=4.1.0-RC.7)`) without replacing host help. `WormAuditTablesGuardrailTest` pins runtime use, seeding or a documented reason, and help for every table; `WormAuditSettingsSeedTest` runs the script's settings seed on H2.
-
 - RC.2 settings: editable, FIELD-audited singleton with insert-only defaults, validation, separate edit permission and a 30-second effective-settings cache. Schedules load at startup.
 - GOVERNANCE exports with 30-day default retention; per-export retention verification, administrator-bypass diagnostics, home warnings and documented COMPLIANCE transition.
 - New `worm-audit:10` settings migration; historical changesets remain unchanged.
