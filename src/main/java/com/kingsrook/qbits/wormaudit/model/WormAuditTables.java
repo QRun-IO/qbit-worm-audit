@@ -67,7 +67,7 @@ public final class WormAuditTables
       List<QTableMetaData> tables = new ArrayList<>();
       tables.add(table(config, CHAIN, "Audit Chain Link", "id:L kind:S audit_id:L detail_ids:T prev_hash:S link_hash:S chained_at:D"));
       tables.add(table(config, CHECKPOINT, "Checkpoint", "id:L from_link_id:L to_link_id:L link_count:L head_hash:S merkle_root:S algorithm:S key_id:S public_key:T signature:T created_at:D"));
-      tables.add(table(config, EXPORT, "Sealed Export", "id:L from_link_id:L to_link_id:L from_checkpoint_id:L to_checkpoint_id:L bucket_alias:S object_prefix:T manifest_key:T manifest_sha256:S prev_manifest_sha256:S object_count:L byte_count:L lock_mode:S retain_until:D sealed_at:D"));
+      tables.add(table(config, EXPORT, "Sealed Export", "id:L from_link_id:L to_link_id:L from_checkpoint_id:L to_checkpoint_id:L bucket_alias:S object_prefix:T object_versions:T manifest_key:T manifest_sha256:S prev_manifest_sha256:S object_count:L byte_count:L lock_mode:S retain_until:D sealed_at:D"));
       tables.add(table(config, VERIFICATION, "Verification", "id:L kind:S trigger:S started_at:D finished_at:D from_link_id:L to_link_id:L links_checked:L outcome:S break_count:L first_break_link_id:L first_break_audit_id:L first_break_reason:T export_id:L run_by:S"));
       tables.add(table(config, PURGE, "Purge", "id:L requested_at:D requested_by:S cutoff:D retention_interval:S outcome:S reason:T audits_deleted:L details_deleted:L links_deleted:L anchor_link_id:L anchor_hash:S"));
       return (tables);

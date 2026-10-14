@@ -55,6 +55,9 @@ public class WormAuditQBitConfig implements QBitConfig
    private int checkpointEveryLinks = 10000;
    private int checkpointEveryMinutes = 60;
    private String verifyCron = "0 0 3 * * ?";
+   private String exportBucketAlias = "worm_audit";
+   private String exportPrefix = "worm-audit";
+   private String exportCron = "0 0 2 * * ?";
    private String schedulerName = "worm_audit";
    private Map<String, String> coreAuditTableNames = Map.of();
    private String appRole = "app";
@@ -261,6 +264,63 @@ public class WormAuditQBitConfig implements QBitConfig
 
 
    /*******************************************************************************
+    ** Read the Object Lock bucket alias.
+    *******************************************************************************/
+   public String getExportBucketAlias()
+   {
+      return (exportBucketAlias);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the Object Lock bucket alias.
+    *******************************************************************************/
+   public WormAuditQBitConfig withExportBucketAlias(String exportBucketAlias)
+   {
+      this.exportBucketAlias = exportBucketAlias;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the export key prefix.
+    *******************************************************************************/
+   public String getExportPrefix()
+   {
+      return (exportPrefix);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the export key prefix.
+    *******************************************************************************/
+   public WormAuditQBitConfig withExportPrefix(String exportPrefix)
+   {
+      this.exportPrefix = exportPrefix;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the UTC export schedule.
+    *******************************************************************************/
+   public String getExportCron()
+   {
+      return (exportCron);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the UTC export schedule.
+    *******************************************************************************/
+   public WormAuditQBitConfig withExportCron(String exportCron)
+   {
+      this.exportCron = exportCron;
+      return (this);
+   }
+
+
+   /*******************************************************************************
     ** Configure verifyCron.
     *******************************************************************************/
    public WormAuditQBitConfig withVerifyCron(String verifyCron)
@@ -352,6 +412,11 @@ public class WormAuditQBitConfig implements QBitConfig
     *******************************************************************************/
    public void validate()
    {
+      if(exportBucketAlias == null || exportBucketAlias.isBlank() || exportCron == null || exportCron.isBlank()
+         || exportPrefix == null || !exportPrefix.matches("[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*"))
+      {
+         throw (new IllegalArgumentException("Export bucket, prefix and schedule must be configured"));
+      }
       if(backendName == null || backendName.isBlank() || retentionYears < 1 || chainIntervalSeconds < 1
          || lateDetailLookbackHours < 1 || settleHorizonSeconds < 0 || batchSize < 1 || checkpointEveryLinks < 1 || checkpointEveryMinutes < 1)
       {

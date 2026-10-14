@@ -25,6 +25,7 @@ import com.kingsrook.qbits.wormaudit.ddl.WormAuditDdl;
 import com.kingsrook.qbits.wormaudit.guard.AppendOnlyGuard;
 import com.kingsrook.qbits.wormaudit.model.LinkRangeWidget;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
+import com.kingsrook.qbits.wormaudit.processes.ExportProcesses;
 import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.metadata.MetaDataProducerMultiOutput;
@@ -122,7 +123,7 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
 
 
    /*******************************************************************************
-    ** Register phase (a) tables, processes and schedules on the host backend.
+    ** Register audit tables, verification/export actions and schedules.
     *******************************************************************************/
    @Override
    public MetaDataProducerMultiOutput produce(QInstance qInstance) throws QException
@@ -167,6 +168,11 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
             .withCodeReference(new QCodeReference(LinkRangeWidget.class)).withDefaultValue("parentTable", name));
       }
       for(var process : WormAuditProcesses.processes(qBitConfig))
+      {
+         process.setSourceQBitName(qBit.getName());
+         output.add(process);
+      }
+      for(var process : ExportProcesses.processes(qBitConfig))
       {
          process.setSourceQBitName(qBit.getName());
          output.add(process);

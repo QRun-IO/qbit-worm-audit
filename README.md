@@ -1,10 +1,10 @@
 # QBit WORM Audit
 
-Phase (a) provides PostgreSQL append-only enforcement, an asynchronous audit hash chain,
-Ed25519 checkpoints, a verification action, and daily verification with core QAlerts signals.
+Phases (a) and (b) provide PostgreSQL append-only enforcement, an asynchronous audit hash chain,
+Ed25519 checkpoints, live and sealed-export verification actions, and daily jobs with core QAlerts signals.
 It hashes exactly the audit values core stored; it does not read application records or
-secured-data keys. Sealed exports and the app home are later phases. The export table and
-range references are present as integration hooks; no export job or home widgets are installed.
+secured-data keys. Sealed JSONL exports use qbit-object-storage 0.1.0-RC.2 and COMPLIANCE
+Object Lock. The app home and setup widgets remain phase (c).
 
 Requires Java 21, Maven wrapper 3.9.11 and QQQ 4.1.0-RC.5. PostgreSQL provides enforcement;
 memory/H2 support tamper-evidence tests without database enforcement.
@@ -18,13 +18,15 @@ Verifications, Sealed Exports, Checkpoints, Audit Chain, and Purges in that orde
 | Table | Purpose | Permission |
 |---|---|---|
 | `worm_audit_verification` | Immutable USER/SCHEDULE results | `worm_audit_verification.read` |
-| `worm_audit_export` | Reserved sealed-export catalog | `worm_audit_export.read` |
+| `worm_audit_export` | Successfully sealed export catalog | `worm_audit_export.read` |
 | `worm_audit_checkpoint` | Signed ranges and Merkle roots | `worm_audit_checkpoint.read` |
 | `worm_audit_chain` | Contiguous links and explicit detail coverage | `worm_audit_chain.read` |
 | `worm_audit_purge` | Refusals, removal counts and retention anchors | `worm_audit_purge.read` |
 
 `worm_audit.verify` authorizes the standard streamed ETL **Verify audit chain** action.
-Processes are attached to the chain table or scheduled; none is a navigation entry.
+It also authorizes **Verify sealed export** on selected export records. `worm_audit.export`
+authorizes **Export now** on the export table. Processes are table/record actions or schedules;
+none is a navigation entry.
 Insert/update/delete capabilities are absent on sidecar tables; update/delete capabilities
 are removed from all four core audit tables. Internal appends use an explicit permission bypass.
 Checkpoint, export and verification record screens have a bounded chain-link child list;
@@ -32,7 +34,7 @@ range endpoints and export/checkpoint references link to their records.
 
 The table metadata customizer can configure host ESB publications. Quick Search registration
 is host-owned through `QuickSearchQBitConfig.searchableTables`; add all five tables.
-Verification inserts use QQQ's record-change listener SPI (as will phase-(b) export inserts),
+Verification and export inserts use QQQ's record-change listener SPI,
 so an installed ESB publisher receives those events when the host configures its destinations
 on these two tables. The qbit defines no destination and configures no chain-link publication.
 
@@ -46,6 +48,9 @@ on these two tables. The qbit defines no destination and configures no chain-lin
 | `trustedPublicKeys` | `Map<String, PublicKey>`; must contain the signing key's public key |
 | `chainIntervalSeconds` | 30 |
 | `settleHorizonSeconds` | 60 (zero allowed) |
+| `exportBucketAlias` | `worm_audit`; qbit-object-storage BACKUP bucket alias |
+| `exportPrefix` | `worm-audit`; slash-separated letters, digits, underscores or hyphens |
+| `exportCron` | `0 0 2 * * ?`; 02:00 UTC on the configured scheduler |
 | `batchSize` | 1,000 headers per tick / links per insert batch |
 | `lateDetailLookbackHours` | 24; positive hours, older omissions checked by full verification |
 | `checkpointEveryLinks` | 10,000; maximum links in each checkpoint |
@@ -143,9 +148,69 @@ rights. The qbit maps those errors to a value-free user-facing message.
 
 Verification starts from the latest successful purge anchor. Checkpoint signatures still verify
 after purge, but Merkle recomputation of a purged/partly purged checkpoint requires its sealed
-export and is reported as a warning. Sealed exports are phase (b); preserve external evidence
-before exercising retention removal in production. Superusers/owners can disable triggers;
+export and is reported as a warning. Seal and verify exports before exercising retention
+removal in production. Superusers/owners can disable triggers;
 protect signing keys and keep public-key pins outside the database.
+
+## Sealed exports
+
+Install qbit-object-storage and configure `exportBucketAlias` (default `worm_audit`) as a
+`BucketRole.BACKUP` bucket. **Object Lock must be enabled when the bucket is created**.
+The exporter requires the bucket's `OBJECT_LOCK` capability to be `SUPPORTED`; run the
+object-storage read-only capability probe during setup. Unknown, partial and unsupported
+capabilities all refuse sealing. Every object receives explicit **COMPLIANCE** retention
+until the sealing time plus `retentionYears` (six by default), checked by HEAD after PUT.
+
+The runtime IAM policy needs `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`,
+`s3:GetObjectRetention`, `s3:PutObjectRetention`, and
+`s3:GetBucketObjectLockConfiguration`. Grant no delete or governance-bypass access.
+The storage bucket's upload size limit must accommodate the largest daily JSONL file.
+Retention protects object versions; protect the storage volumes and maintain off-site copies too.
+
+At 02:00 UTC, or through **Export now**, the exporter takes the chainer's writer lock and
+seals links after the previous export through the latest checkpoint. The first export starts
+after the purge anchor, or at genesis. No new checkpoint produces an explicit "Nothing to
+seal" Result. If retention has removed an unexported gap, or a range cannot be proven by
+complete signed checkpoints, sealing refuses rather than recording incomplete evidence.
+Other database backends require a single writer JVM, as in phase (a).
+
+Keys use `<exportPrefix>/<yyyy>/<MM>/<dd>/<from>-<to>/` with a UTC date:
+
+- `links.jsonl`: JCS lines containing `link` identifiers/hashes and the embedded canonical
+  `content` document exactly as hashed.
+- `checkpoints.jsonl`: JCS checkpoint envelopes including signatures and public keys.
+- `manifest.json`: JCS `worm-audit-export/1` with `fromLinkId`, `toLinkId`, `linkCount`,
+  `checkpointCount`, `files` (filename to SHA-256), `headHash`, `prevManifestSha256`,
+  `qbitVersion`, and `createdAt`.
+
+Files are streamed through temporary disk storage with 1,000-link pages and batched content
+fetches, then removed. Only ids, hashes and object metadata enter the export catalog.
+The `object_versions` text column pins each upload's returned version id in a JCS JSON
+object keyed by `checkpoints.jsonl`, `links.jsonl`, and `manifest.json`. Sealing refuses
+missing version ids or a different version in the retention HEAD response, leaving no
+catalog row and raising the export failure alert.
+Partial upload failures leave no catalog row; retained orphan objects may remain. Retrying
+can create new locked versions under the same keys. Failures raise `worm_audit.export.failed`
+with dedup key `export`; success resolves it. Every scheduled run emits
+`worm_audit.export.daily`.
+
+**Verify sealed export** accepts one or several selected records. It downloads and checks
+the object hashes, retention, manifest chain, link hashes, pinned checkpoint signatures and
+Merkle roots, then compares the sealed content and link metadata against a live database
+snapshot. Differences name exact link/audit ids without printing audit values. Each export
+gets its own `SEALED_EXPORT` verification row. Purged prefixes verify from the sealed copy
+alone and receive an INFO line. Verification does not write restored audit rows.
+
+Verification compares every current HEAD version to the catalog and reports an ERROR for
+any overwrite, even when the replacement bytes are identical. It then reads the recorded
+sealed versions, so retained evidence remains verifiable after an overwrite; the overall
+verification still fails because the overwrite is a break. Missing catalog versions fail
+closed. RC.2's `StorageBucket.get` has no version parameter, so the adapter uses the public
+`ObjectStorageRuntime.connection(...).client()` accessor for an explicit S3 version GET,
+reusing its connection, key normalization and rate limiter and checking the response version.
+No object-storage change is required; this adapter depends on RC.2's public internal runtime
+accessors. The storage credentials need `s3:GetObjectVersion` in addition to the existing
+upload, HEAD and listing permissions.
 
 ## Build and acceptance
 
@@ -170,7 +235,21 @@ $env:CI = 'true'
 ./mvnw.cmd -o verify
 ```
 
-POSIX equivalents: `CI=true ./mvnw -o -Dtest=PostgresAcceptanceTest test` and
+MinIO export acceptance uses the same `RequiresDockerCondition`. It checks COMPLIANCE
+retention, denied version deletion, overwrite version preservation, export verification,
+exact live-tamper findings through the record action, and refusal of a bucket without lock:
+
+```powershell
+$env:CI = 'true'
+./mvnw.cmd -o '-Dtest=MinioExportAcceptanceTest' test
+```
+
+The default MinIO image is pinned to the same Chainguard digest as object-storage's tests.
+Override it with `-Dqqq.test.minioImage=<image>` when necessary. Images must already be
+available for a completely network-free Docker run.
+
+POSIX equivalents: `CI=true ./mvnw -o -Dtest=MinioExportAcceptanceTest test`,
+`CI=true ./mvnw -o -Dtest=PostgresAcceptanceTest test` and
 `CI=true ./mvnw -o verify`. No commits, publishing or deployment are part of these commands.
 
 ## License

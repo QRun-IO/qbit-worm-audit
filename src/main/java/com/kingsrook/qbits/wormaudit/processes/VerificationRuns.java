@@ -100,8 +100,17 @@ public final class VerificationRuns
     *******************************************************************************/
    public static QRecord save(VerificationResult result, String trigger) throws QException
    {
+      return (save(result, trigger, null));
+   }
+
+
+   /*******************************************************************************
+    ** Append a chain or sealed-export result using the same immutable schema.
+    *******************************************************************************/
+   public static QRecord save(VerificationResult result, String trigger, Long exportId) throws QException
+   {
       String user = QContext.getQSession() == null || QContext.getQSession().getUser() == null ? "system" : QContext.getQSession().getUser().getIdReference();
-      QRecord row = new QRecord().withValue("kind", "CHAIN").withValue("trigger", trigger)
+      QRecord row = new QRecord().withValue("kind", exportId == null ? "CHAIN" : "SEALED_EXPORT").withValue("export_id", exportId).withValue("trigger", trigger)
          .withValue("started_at", result.getStartedAt()).withValue("finished_at", Instant.now())
          .withValue("from_link_id", result.getFromLinkId()).withValue("to_link_id", result.getToLinkId())
          .withValue("links_checked", result.getLinksChecked()).withValue("outcome", result.passed() ? "PASS" : "FAIL")
