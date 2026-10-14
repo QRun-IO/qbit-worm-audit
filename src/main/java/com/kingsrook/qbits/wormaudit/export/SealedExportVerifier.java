@@ -94,6 +94,7 @@ public class SealedExportVerifier
     *******************************************************************************/
    public Report verify(QRecord export, String trigger) throws QException
    {
+      config.effectiveSettings();
       VerificationResult failure = new VerificationResult();
       failure.scope(0, export.getValueLong("from_link_id"), export.getValueLong("to_link_id"));
       Report report;
@@ -121,21 +122,33 @@ public class SealedExportVerifier
                   throw (new IOException("Missing sealed object version"));
                }
                var head = storage.head(key);
+               if(head == null)
+               {
+                  failure.add(null, null, "object " + key + " is missing" + ("GOVERNANCE".equals(export.getValueString("lock_mode"))
+                     ? "; possible GOVERNANCE bypass removal by an administrator" : ""));
+               }
                if(head != null && !version.equals(head.getVersionId()))
                {
                   failure.add(null, null, "object " + name + " was overwritten after sealing (current version " + head.getVersionId()
                      + ", sealed version " + version + " is still retained under Object Lock)");
                }
-               if(!ExportFiles.locked(head, export.getValueInstant("retain_until")))
+               if(!ExportFiles.locked(head, export.getValueString("lock_mode"), export.getValueInstant("retain_until")))
                {
-                  failure.add(null, null, "object " + name + " lacks the recorded COMPLIANCE retention");
+                  failure.add(null, null, "object " + name + " lacks the recorded " + export.getValueString("lock_mode") + " retention");
                }
             }
             for(String name : ExportFiles.NAMES)
             {
-               try(InputStream input = storage.getVersion(export.getValueString("object_prefix") + name, (String) versions.get(name)))
+               String key = export.getValueString("object_prefix") + name;
+               try(InputStream input = storage.getVersion(key, (String) versions.get(name)))
                {
                   Files.copy(input, files.file(name));
+               }
+               catch(Exception e)
+               {
+                  failure.add(null, null, "object " + key + " sealed version cannot be read" + ("GOVERNANCE".equals(export.getValueString("lock_mode"))
+                     ? "; if removed, possible GOVERNANCE bypass removal by an administrator" : ""));
+                  throw (new IOException("Cannot read sealed object version"));
                }
             }
             report = inspect(files, export, new AuditStore(transaction));
@@ -189,7 +202,7 @@ public class SealedExportVerifier
          || !Objects.equals(manifest.get("fromLinkId"), from) || !Objects.equals(manifest.get("toLinkId"), to)
          || !Objects.equals(manifest.get("linkCount"), to - from + 1)
          || !Objects.equals(manifest.get("createdAt"), export.getValueInstant("sealed_at").toString())
-         || !"COMPLIANCE".equals(export.getValueString("lock_mode"))
+         || !java.util.Set.of("GOVERNANCE", "COMPLIANCE").contains(export.getValueString("lock_mode"))
          || !Objects.equals(export.getValueString("manifest_key"), export.getValueString("object_prefix") + "manifest.json"))
       {
          result.add(null, null, "Manifest metadata does not match the export row");
@@ -256,7 +269,7 @@ public class SealedExportVerifier
             long start = checkpoint.getValueLong("from_link_id");
             long count = checkpoint.getValueLong("link_count");
             if(start != cursor + 1 || end < start || end > to || count != end - start + 1
-               || count > config.getCheckpointEveryLinks() || checkpointId <= lastCheckpoint)
+               || count > Integer.MAX_VALUE || checkpointId <= lastCheckpoint)
             {
                result.add(null, null, label + "invalid or incomplete checkpoint range");
                break;

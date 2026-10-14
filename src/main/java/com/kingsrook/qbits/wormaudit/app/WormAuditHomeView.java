@@ -82,6 +82,8 @@ public final class WormAuditHomeView
       }
       close(html);
       open(html, "Export status");
+      row(html, "Export lock mode", data.exportLockMode());
+      row(html, "Export retention", data.exportRetentionDays() + " days");
       QRecord export = data.lastExport();
       if(export == null)
       {
@@ -93,7 +95,7 @@ public final class WormAuditHomeView
          row(html, "Link range", export.getValueLong("from_link_id") + "–" + export.getValueLong("to_link_id"));
          row(html, "Sealed at", when(export.getValueInstant("sealed_at"), "Not recorded"));
          row(html, "Retain until", when(export.getValueInstant("retain_until"), "Not recorded"));
-         row(html, "Lock mode", export.getValueString("lock_mode"));
+         row(html, "Last export lock mode", export.getValueString("lock_mode"));
       }
       row(html, "Export lag", data.exportLag() + " links; " + (data.exportAgeHours() == null ? "no previous export time" : data.exportAgeHours() + " h since last export"));
       row(html, "Gaps in sealed ranges", data.exportGaps().isEmpty() ? (export == null ? "No sealed ranges to check" : "None") : String.join(", ", data.exportGaps()));

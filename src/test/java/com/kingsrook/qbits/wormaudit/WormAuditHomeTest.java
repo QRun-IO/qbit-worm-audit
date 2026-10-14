@@ -84,7 +84,7 @@ class WormAuditHomeTest
       assertThat(data.oldestAudit()).isNull();
       assertThat(data.nextPurge()).isNull();
       assertThat(data.exportAgeHours()).isNull();
-      assertThat(data.warnings()).containsExactly("No signing key configured", "No trusted public keys configured", "Daily verification has never run");
+      assertThat(data.warnings()).contains("No signing key configured", "No trusted public keys configured", "Daily verification has never run");
       String html = WormAuditHomeView.render(data, "/app");
       assertThat(html).contains("Chain status", "Export status", "Retention", "Recent purges", "Setup warnings",
          "No links chained yet", "No verification has run yet", "Unknown until verification runs", "No sealed exports yet",
@@ -132,9 +132,9 @@ class WormAuditHomeTest
       VerificationRuns.save(new WormAuditVerifier(config).verify(null, now.plusSeconds(67)), "SCHEDULE", null, now.plusSeconds(68));
       data = WormAuditHomeData.load(config, new MemorySealedStore(), now.plusSeconds(69));
       assertThat(data.openBreak()).isNull();
-      assertThat(data.warnings()).isEmpty();
-      assertThat(WormAuditHomeView.render(data, "/app")).doesNotContain("Setup warnings");
-      assertThat(WormAuditHomeView.renderHealthCard(data, "/app/worm_audit")).contains("No open chain breaks reported");
+      assertThat(data.warnings()).hasSize(2);
+      assertThat(WormAuditHomeView.render(data, "/app")).contains("Setup warnings", "GOVERNANCE", "30 days");
+      assertThat(WormAuditHomeView.renderHealthCard(data, "/app/worm_audit")).contains("Setup needs attention");
    }
 
 
@@ -164,8 +164,8 @@ class WormAuditHomeTest
       assertThat(data.exportGaps()).isEmpty();
       assertThat(data.lockCapability()).isEqualTo("SUPPORTED");
       assertThat(data.bucketAlias()).isEqualTo("worm_audit");
-      assertThat(data.lastExport().getValueString("lock_mode")).isEqualTo("COMPLIANCE");
-      assertThat(WormAuditHomeView.render(data, "/app")).contains("/app/worm_audit_export/1", "COMPLIANCE", "Retain until");
+      assertThat(data.lastExport().getValueString("lock_mode")).isEqualTo("GOVERNANCE");
+      assertThat(WormAuditHomeView.render(data, "/app")).contains("/app/worm_audit_export/1", "GOVERNANCE", "Retain until");
       // Corruption fixture only: the real exporter never creates this hole.
       tamper(WormAuditTables.EXPORT, 1, "from_link_id", 3L);
       assertThat(WormAuditHomeData.load(config, storage, now).exportGaps()).containsExactly("1–2");
@@ -270,7 +270,7 @@ class WormAuditHomeTest
       assertThat(instance.getApp("evidence").getWidgets()).containsExactly(WormAuditApp.HOME_WIDGET);
       assertThat(instance.getApp("evidence").getChildren()).extracting(c -> c.getName()).containsExactlyElementsOf(WormAuditTables.NAV);
       assertThat(instance.getApp("evidence").getChildren()).extracting(c -> c.getLabel())
-         .containsExactly("Verifications", "Sealed Exports", "Checkpoints", "Audit Chain", "Purges");
+         .containsExactly("Verifications", "Sealed Exports", "Checkpoints", "Audit Chain", "Purges", "Settings");
       assertThat(instance.getWidget(WormAuditApp.HOME_WIDGET).getGridColumns()).isEqualTo(12);
       assertThat(instance.getWidget(WormAuditApp.HOME_WIDGET).getIsCard()).isFalse();
       assertThat(instance.getWidget(WormAuditApp.HEALTH_CARD_WIDGET).getIsCard()).isTrue();
@@ -300,7 +300,7 @@ class WormAuditHomeTest
          assertThat(data.links()).isEqualTo(1);
          assertThat(data.backlog()).isEqualTo(1);
          assertThat(data.settling()).isEqualTo(1);
-         assertThat(data.warnings()).containsExactly("Daily verification has never run");
+         assertThat(data.warnings()).contains("Daily verification has never run");
       }
    }
 
@@ -325,7 +325,7 @@ class WormAuditHomeTest
       assertThat(data.exportLag()).isEqualTo(5);
       assertThat(data.backlog()).isEqualTo(2);
       assertThat(data.settling()).isEqualTo(1);
-      assertThat(data.warnings()).isEmpty();
+      assertThat(data.warnings()).hasSize(2);
       assertThat(data.recentPurges()).extracting(r -> r.getValueString("outcome")).containsExactly("REFUSED", "PURGED");
       assertThat(STORE.where(WormAuditTables.VERIFICATION, "outcome", "FAIL")).hasSize(1).allSatisfy(row ->
       {

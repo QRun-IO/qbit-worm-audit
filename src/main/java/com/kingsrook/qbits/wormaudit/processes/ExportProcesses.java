@@ -84,6 +84,7 @@ public final class ExportProcesses
     *******************************************************************************/
    public static List<QProcessMetaData> processes(WormAuditQBitConfig config)
    {
+      var settings = config.effectiveSettings();
       Map<String, Serializable> values = new HashMap<>();
       values.put(StreamedETLWithFrontendProcess.FIELD_SOURCE_TABLE, WormAuditTables.EXPORT);
       values.put(StreamedETLWithFrontendProcess.FIELD_DESTINATION_TABLE, WormAuditTables.EXPORT);
@@ -97,7 +98,7 @@ public final class ExportProcesses
       QProcessMetaData daily = new QProcessMetaData().withName(DAILY).withLabel("Daily sealed audit export")
          .withStep(new QBackendStepMetaData().withName("export").withCode(new QCodeReference(Daily.class)))
          .withPermissionRules(permission(PERMISSION)).withSchedule(new QScheduleMetaData().withSchedulerName(config.getSchedulerName())
-            .withCronExpression(config.getExportCron()).withCronTimeZoneId("UTC"));
+            .withCronExpression(settings.export_cron()).withCronTimeZoneId("UTC"));
       return (List.of(export, verify, daily));
    }
 

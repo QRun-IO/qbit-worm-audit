@@ -31,6 +31,7 @@ import java.util.TreeMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 import com.kingsrook.qbits.wormaudit.WormAuditQBitConfig;
+import com.kingsrook.qbits.wormaudit.WormAuditSettings;
 import com.kingsrook.qbits.wormaudit.checkpoint.Checkpoints;
 import com.kingsrook.qbits.wormaudit.guard.AppendOnlyGuard;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
@@ -99,7 +100,7 @@ public class WormAuditChainer
                   }
                }
             }
-            Counts counts = append(new AuditStore(transaction), now);
+            Counts counts = append(new AuditStore(transaction), now, config.effectiveSettings());
             transaction.commit();
             return (counts);
          }
@@ -119,14 +120,14 @@ public class WormAuditChainer
    /*******************************************************************************
     ** Append settled headers and uncovered detail chunks, then checkpoint.
     *******************************************************************************/
-   private Counts append(AuditStore store, Instant now) throws Exception
+   private Counts append(AuditStore store, Instant now, WormAuditSettings.Values settings) throws Exception
    {
       QRecord tail = store.last(WormAuditTables.CHAIN);
       QRecord anchor = store.anchor();
       long nextId = tail == null ? anchor.getValueLong("anchor_link_id") + 1 : tail.getValueLong("id") + 1;
       String previous = tail == null ? anchor.getValueString("anchor_hash") : tail.getValueString("link_hash");
       List<QRecord> appended = new ArrayList<>();
-      Instant cutoff = now.minusSeconds(config.getSettleHorizonSeconds());
+      Instant cutoff = now.minusSeconds(settings.settle_horizon_seconds());
       List<QRecord> audits = store.unchained(cutoff, config.getBatchSize());
       Map<Long, QRecord> details = AuditStore.index(store.in("auditDetail", "auditId", audits.stream().map(r -> r.getValueLong("id")).toList()));
       Map<Long, List<QRecord>> grouped = details.values().stream().collect(Collectors.groupingBy(r -> r.getValueLong("auditId")));
@@ -149,7 +150,7 @@ public class WormAuditChainer
       insertLinks(store, appended);
       int linkCount = appended.size();
       appended.clear();
-      details = AuditStore.index(store.lateDetails(cutoff, config.getLateDetailLookbackHours(), config.getBatchSize()));
+      details = AuditStore.index(store.lateDetails(cutoff, settings.late_detail_lookback_hours(), config.getBatchSize()));
       grouped = details.values().stream().collect(Collectors.groupingBy(r -> r.getValueLong("auditId"), TreeMap::new, Collectors.toList()));
       Map<Long, QRecord> headers = AuditStore.index(store.in("audit", "id", grouped.keySet()));
       for(var entry : grouped.entrySet())
@@ -165,7 +166,7 @@ public class WormAuditChainer
          }
       }
       insertLinks(store, appended);
-      return (new Counts(audits.size(), lateDetails, linkCount + appended.size(), checkpoint(store, now), false));
+      return (new Counts(audits.size(), lateDetails, linkCount + appended.size(), checkpoint(store, now, settings), false));
    }
 
 
@@ -195,7 +196,7 @@ public class WormAuditChainer
    /*******************************************************************************
     ** Checkpoint the uncheckpointed suffix by count or elapsed time.
     *******************************************************************************/
-   private int checkpoint(AuditStore store, Instant now) throws Exception
+   private int checkpoint(AuditStore store, Instant now, WormAuditSettings.Values settings) throws Exception
    {
       if(config.getSigningKey() == null)
       {
@@ -206,13 +207,13 @@ public class WormAuditChainer
       int count = 0;
       while(true)
       {
-         List<QRecord> pending = store.page(WormAuditTables.CHAIN, lastId, config.getCheckpointEveryLinks());
+         List<QRecord> pending = store.page(WormAuditTables.CHAIN, lastId, settings.checkpoint_every_links());
          if(pending.isEmpty())
          {
             return (count);
          }
          Instant since = latest == null ? pending.getFirst().getValueInstant("chained_at") : latest.getValueInstant("created_at");
-         if(pending.size() < config.getCheckpointEveryLinks() && now.isBefore(since.plusSeconds(config.getCheckpointEveryMinutes() * 60L)))
+         if(pending.size() < settings.checkpoint_every_links() && now.isBefore(since.plusSeconds(settings.checkpoint_every_minutes() * 60L)))
          {
             return (count);
          }

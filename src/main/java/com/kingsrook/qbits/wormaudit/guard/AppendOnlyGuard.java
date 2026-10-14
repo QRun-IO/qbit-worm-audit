@@ -45,6 +45,13 @@ public class AppendOnlyGuard implements MetaDataCustomizerInterface<QTableMetaDa
    @Override
    public QTableMetaData customizeMetaData(QInstance instance, QTableMetaData table)
    {
+      if(com.kingsrook.qbits.wormaudit.model.WormAuditTables.SETTINGS.equals(table.getName()))
+      {
+         table.withoutCapabilities(Capability.TABLE_INSERT, Capability.TABLE_DELETE);
+         table.withAuditRules(new com.kingsrook.qqq.backend.core.model.metadata.audits.QAuditRules()
+            .withAuditLevel(com.kingsrook.qqq.backend.core.model.metadata.audits.AuditLevel.FIELD));
+         return (table);
+      }
       if(CORE_TABLES.contains(table.getName()) || table.getName().startsWith("worm_audit_"))
       {
          table.withoutCapabilities(Capability.TABLE_UPDATE, Capability.TABLE_DELETE);
