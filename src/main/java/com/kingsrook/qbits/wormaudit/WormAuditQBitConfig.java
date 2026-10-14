@@ -45,6 +45,9 @@ public class WormAuditQBitConfig implements QBitConfig
    {
    }
 
+   private String exportLockMode = "GOVERNANCE";
+   private int exportRetentionDays = 30;
+   private final WormAuditSettings settings = new WormAuditSettings(this);
    private String appName = "worm_audit";
    private String appLabel = "WORM Audit";
    private String parentAppName;
@@ -68,6 +71,63 @@ public class WormAuditQBitConfig implements QBitConfig
    private Map<String, String> coreAuditTableNames = Map.of();
    private String appRole = "app";
    private MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer = null;
+
+
+   /*******************************************************************************
+    ** Read exportLockMode.
+    *******************************************************************************/
+   public String getExportLockMode()
+   {
+      return (exportLockMode);
+   }
+
+
+   /*******************************************************************************
+    ** Configure exportLockMode.
+    *******************************************************************************/
+   public WormAuditQBitConfig withExportLockMode(String exportLockMode)
+   {
+      this.exportLockMode = exportLockMode;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read exportRetentionDays.
+    *******************************************************************************/
+   public int getExportRetentionDays()
+   {
+      return (exportRetentionDays);
+   }
+
+
+   /*******************************************************************************
+    ** Configure exportRetentionDays.
+    *******************************************************************************/
+   public WormAuditQBitConfig withExportRetentionDays(int exportRetentionDays)
+   {
+      this.exportRetentionDays = exportRetentionDays;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read effective settings through the instance-scoped 30-second cache.
+    *******************************************************************************/
+   @JsonIgnore
+   public WormAuditSettings.Values effectiveSettings()
+   {
+      return (settings.read());
+   }
+
+
+   /*******************************************************************************
+    ** Discard this instance's cached row after a successful local settings write.
+    *******************************************************************************/
+   public void invalidateSettings()
+   {
+      settings.invalidate();
+   }
 
 
    /*******************************************************************************
@@ -527,6 +587,7 @@ public class WormAuditQBitConfig implements QBitConfig
       {
          throw (new IllegalArgumentException("Export bucket, prefix and schedule must be configured"));
       }
+      WormAuditSettings.validate(WormAuditSettings.defaults(this));
       if(backendName == null || backendName.isBlank() || retentionYears < 1 || chainIntervalSeconds < 1
          || lateDetailLookbackHours < 1 || settleHorizonSeconds < 0 || batchSize < 1 || checkpointEveryLinks < 1 || checkpointEveryMinutes < 1)
       {

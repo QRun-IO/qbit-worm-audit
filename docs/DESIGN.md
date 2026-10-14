@@ -228,6 +228,10 @@ installed the alerts go to the log.
 ## 6. Sealed exports
 
 ### 6.1 Export job
+
+**Default superseded by Owner decisions (2026-10-14) below:** lock mode and export retention
+now come from Settings, defaulting to GOVERNANCE and 30 days. The original decision text is
+retained for history.
 Daily at 02:00 (configurable), and by the table action "Export now" on `worm_audit_export`:
 1. Range: links after the last export's `to_link_id`, up to the latest checkpoint. Exports are
    contiguous by construction. The app home flags a gap (a range not covered) and lag.
@@ -386,3 +390,33 @@ registers as a `MiddlewareSpecExtension` under `/qqq/v1/qbit/worm-audit/...`
 
 These are owner-run (Praetor and cluster-gitops are applied by the owner). The qbit only
 documents them.
+
+## Owner decisions (2026-10-14)
+
+The 2026-10-12 decisions above remain the historical design. These decisions supersede the
+COMPLIANCE/six-year export default in §6.1 and the corresponding default assumptions in
+§§2, 4.5, 9, 11, 12 and the §14 infrastructure proposal.
+
+- Settings live in the application as the standard QQQ `worm_audit_settings` table, record
+  ID 1, labelled WORM Audit Settings and navigated as Settings after Purges. It allows edits,
+  has no append-only triggers, and uses FIELD-level core audit so every change is chained.
+  Reading needs `worm_audit_settings.read`; editing additionally needs
+  `worm_audit_settings.edit` and `worm_audit.settings`. New IDs and deletion are refused.
+- Defaults are seeded insert-only in new changeset `worm-audit:10`; existing changesets are
+  unchanged. An administrator's edits survive subsequent seeding. Config supplies defaults
+  when a row/field/table is absent. Runtime reads cache at most 30 seconds, scoped to the
+  QInstance. Chain interval and UTC Quartz export/verify schedules take effect after restart.
+- kof22 starts with **GOVERNANCE, 30 days** for sealed exports. An administrator with
+  `s3:BypassGovernanceRetention` can remove those copies. This is deliberately reversible;
+  it does not provide COMPLIANCE's irreversible retention. Runtime credentials still receive
+  no delete or bypass permission. Bucket defaults should match the selected settings.
+- Changing Settings to COMPLIANCE affects new exports. Existing GOVERNANCE versions retain
+  their original mode unless an administrator extends/upgrades them. Verification checks
+  the catalog's recorded mode and date, so external mode changes are reported as mismatches.
+  COMPLIANCE cannot be undone. The settings change itself is audited and chained.
+- Audit retention defaults to six years independently of export retention. The home warns
+  about a shorter export horizon and a mismatch with the purge function's compiled interval.
+  Updating the setting does not modify the purge function; that still requires a migration.
+
+The README Settings table specifies all fields, defaults, bounds and timing. Signing keys,
+public-key pins, bucket alias, prefix and backend remain host configuration, never settings.

@@ -32,6 +32,7 @@ import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
 import com.kingsrook.qqq.backend.core.alerts.AlertDefaultMonitor;
 import com.kingsrook.qqq.backend.core.alerts.AlertSeverity;
 import com.kingsrook.qqq.backend.core.alerts.QAlertTypeMetaData;
+import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.metadata.MetaDataProducerMultiOutput;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
@@ -182,21 +183,31 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
          output.add(new QWidgetMetaData().withName(name + "_links").withLabel("Chain links").withType("childRecordList").withGridColumns(12)
             .withCodeReference(new QCodeReference(LinkRangeWidget.class)).withDefaultValue("parentTable", name));
       }
-      for(var process : WormAuditProcesses.processes(qBitConfig))
+      List<QTableMetaData> producedTables = output.getEach(QTableMetaData.class);
+      output.addSelfToInstance(qInstance);
+      output = new MetaDataProducerMultiOutput();
+      var previousInstance = QContext.getQInstance();
+      var previousSession = QContext.getQSession();
+      var previousTransaction = QContext.getQBackendTransaction();
+      try
       {
-         process.setSourceQBitName(qBit.getName());
-         output.add(process);
+         // Production is still assembling the host metadata. Do not validate it mid-build.
+         QContext.setQInstance(qInstance);
+         QContext.setQSession(new com.kingsrook.qqq.backend.core.model.session.QSession());
+         QContext.setTransaction(null);
+         addProcesses(output, qBit);
       }
-      for(var process : ExportProcesses.processes(qBitConfig))
+      finally
       {
-         process.setSourceQBitName(qBit.getName());
-         output.add(process);
+         QContext.setQInstance(previousInstance);
+         QContext.setQSession(previousSession);
+         QContext.setTransaction(previousTransaction);
       }
       if(qInstance.getSchedulers() == null || !qInstance.getSchedulers().containsKey(qBitConfig.getSchedulerName()))
       {
          qInstance.addScheduler(new QuartzSchedulerMetaData().withName(qBitConfig.getSchedulerName()));
       }
-      output.add(WormAuditApp.app(qBitConfig, output.getEach(QTableMetaData.class)));
+      output.add(WormAuditApp.app(qBitConfig, producedTables));
       for(QWidgetMetaData widget : WormAuditApp.widgets())
       {
          output.add(widget);
@@ -221,6 +232,24 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
       output.addSelfToInstance(qInstance);
       denyAssistant(qInstance);
       return (new MetaDataProducerMultiOutput());
+   }
+
+
+   /*******************************************************************************
+    ** Build schedules from settings available at producer startup.
+    *******************************************************************************/
+   private void addProcesses(MetaDataProducerMultiOutput output, QBitMetaData qBit)
+   {
+      for(var process : WormAuditProcesses.processes(qBitConfig))
+      {
+         process.setSourceQBitName(qBit.getName());
+         output.add(process);
+      }
+      for(var process : ExportProcesses.processes(qBitConfig))
+      {
+         process.setSourceQBitName(qBit.getName());
+         output.add(process);
+      }
    }
 
 

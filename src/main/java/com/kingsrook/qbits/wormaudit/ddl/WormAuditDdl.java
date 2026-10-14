@@ -102,6 +102,13 @@ public final class WormAuditDdl
          {
             sql = sql.replace("${" + entry.getValue() + "}", identifier(names.get(entry.getKey())));
          }
+         var defaults = com.kingsrook.qbits.wormaudit.WormAuditSettings.defaults(config);
+         com.kingsrook.qbits.wormaudit.WormAuditSettings.validate(defaults);
+         String values = java.util.List.of("id", "audit_retention_years", "export_lock_mode", "export_retention_days", "checkpoint_every_links",
+            "checkpoint_every_minutes", "chain_interval_seconds", "settle_horizon_seconds", "late_detail_lookback_hours", "export_cron", "verify_cron")
+            .stream().map(field -> defaults.getValue(field) instanceof Number ? defaults.getValue(field).toString()
+               : "'" + defaults.getValueString(field).replace("'", "''") + "'").collect(java.util.stream.Collectors.joining(", "));
+         sql = sql.replace("${settings_values}", values);
          return (sql.replace("${app_role}", identifier(config.getAppRole())).replace("${retention}", config.getRetentionYears() + " years"));
       }
       catch(IOException e)

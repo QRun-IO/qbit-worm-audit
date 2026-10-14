@@ -152,9 +152,9 @@ public class ExportFiles implements AutoCloseable
    /*******************************************************************************
     ** A lock echo is required even if a provider advertises the capability.
     *******************************************************************************/
-   public static boolean locked(StoredObject object, java.time.Instant until)
+   public static boolean locked(StoredObject object, String mode, java.time.Instant until)
    {
-      return (object != null && "COMPLIANCE".equals(object.getLockMode()) && object.getLockRetainUntil() != null
+      return (object != null && java.util.Objects.equals(mode, object.getLockMode()) && object.getLockRetainUntil() != null
          && !object.getLockRetainUntil().isBefore(until));
    }
 

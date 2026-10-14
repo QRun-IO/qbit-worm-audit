@@ -84,7 +84,7 @@ class SealedExportTest
       boolean omitVersion;
       boolean racePut;
       boolean supported = true;
-      String echoMode = "COMPLIANCE";
+      String echoMode;
       long shortenSeconds;
       int failPut;
 
@@ -95,7 +95,7 @@ class SealedExportTest
       }
 
       @Override
-      public String put(String key, Path file, Instant until) throws Exception
+      public String put(String key, Path file, com.kingsrook.qbits.objectstorage.api.LockMode mode, Instant until) throws Exception
       {
          if(failPut > 0 && objects.size() + 1 == failPut)
          {
@@ -108,7 +108,7 @@ class SealedExportTest
          String version = omitVersion ? missingVersion : "v" + ++nextVersion;
          objects.put(key, Files.readAllBytes(file));
          heads.put(key, new StoredObject().withKey(key).withVersionId(racePut ? "replacement" : version)
-            .withLockMode(echoMode).withLockRetainUntil(until.minusSeconds(shortenSeconds)));
+            .withLockMode(echoMode == null ? mode.name() : echoMode).withLockRetainUntil(until.minusSeconds(shortenSeconds)));
          return (version);
       }
 
@@ -197,7 +197,7 @@ class SealedExportTest
       assertThat(row.getValues()).containsKeys("from_checkpoint_id", "to_checkpoint_id", "bucket_alias", "manifest_key", "manifest_sha256",
          "prev_manifest_sha256", "object_count", "byte_count", "lock_mode", "retain_until", "sealed_at");
       assertThat(row.getValueLong("byte_count")).isEqualTo(storage.objects.values().stream().mapToLong(b -> b.length).sum());
-      assertThat(row.getValueInstant("retain_until")).isEqualTo(Instant.parse("2032-10-14T02:00:00Z"));
+      assertThat(row.getValueInstant("retain_until")).isEqualTo(NOW.plusSeconds(30 * 86400L));
       assertThat(verify(row).result().passed()).isTrue();
       QRecord verification = STORE.last(WormAuditTables.VERIFICATION);
       assertThat(verification.getValueString("kind")).isEqualTo("SEALED_EXPORT");
@@ -224,7 +224,7 @@ class SealedExportTest
       {
          String linksKey = row.getValueString("object_prefix") + "links.jsonl";
          Files.write(files.file("links.jsonl"), storage.objects.get(linksKey));
-         storage.put(linksKey, files.file("links.jsonl"), row.getValueInstant("retain_until"));
+         storage.put(linksKey, files.file("links.jsonl"), com.kingsrook.qbits.objectstorage.api.LockMode.valueOf(row.getValueString("lock_mode")), row.getValueInstant("retain_until"));
          var identical = verify(row);
          assertThat(identical.result().passed()).isFalse();
          assertThat(identical.result().getLinksChecked()).isEqualTo(1);
@@ -234,7 +234,7 @@ class SealedExportTest
          {
             String key = row.getValueString("object_prefix") + name;
             Files.writeString(files.file(name), "different bytes");
-            String current = storage.put(key, files.file(name), row.getValueInstant("retain_until"));
+            String current = storage.put(key, files.file(name), com.kingsrook.qbits.objectstorage.api.LockMode.valueOf(row.getValueString("lock_mode")), row.getValueInstant("retain_until"));
             var report = verify(row);
             assertThat(report.result().passed()).isFalse();
             assertThat(report.result().getLinksChecked()).isEqualTo(1);
@@ -330,9 +330,9 @@ class SealedExportTest
       assertThat(new SealedExporter(config, storage).run("SCHEDULE", NOW).message()).contains("does not support Object Lock");
       assertThat(storage.objects).isEmpty();
       storage.supported = true;
-      storage.echoMode = "GOVERNANCE";
-      assertThat(new SealedExporter(config, storage).run("USER", NOW).message()).contains("did not echo COMPLIANCE");
       storage.echoMode = "COMPLIANCE";
+      assertThat(new SealedExporter(config, storage).run("USER", NOW).message()).contains("did not echo GOVERNANCE");
+      storage.echoMode = null;
       storage.shortenSeconds = 1;
       assertThat(new SealedExporter(config, storage).run("USER", NOW).failed()).isTrue();
       storage.shortenSeconds = 0;
@@ -358,9 +358,9 @@ class SealedExportTest
       storage.objects.put(key, "tampered".getBytes(StandardCharsets.UTF_8));
       assertThat(findings(first)).contains("object links.jsonl hash does not match the manifest");
       storage.objects.put(key, original);
-      storage.heads.get(key).withLockMode("GOVERNANCE");
-      assertThat(findings(first)).contains("lacks the recorded COMPLIANCE retention");
       storage.heads.get(key).withLockMode("COMPLIANCE");
+      assertThat(findings(first)).contains("lacks the recorded GOVERNANCE retention");
+      storage.heads.get(key).withLockMode(first.getValueString("lock_mode"));
       audit(2);
       QRecord second = seal();
       tamper(WormAuditTables.EXPORT, first.getValueLong("id"), "manifest_sha256", "f".repeat(64));

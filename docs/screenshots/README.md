@@ -1,5 +1,14 @@
 # WORM Audit screenshots
 
+## RC.2 settings captures (2026-10-14)
+Home (GOVERNANCE, 30-day exports) and the WORM Audit Settings record at 390 x 844 and 1440 x 1000,
+light and dark, captured with Playwright against `WormAuditDemoServer` on port 8099:
+`worm-audit-home-{390,1440}-{light,dark}.jpg` (replaced) and
+`worm-audit-settings-{390,1440}-{light,dark}.jpg` (new). Overflow check on all eight: no page
+horizontal overflow, no inner horizontal scrollers, no double scrollbars.
+
+## Earlier captures
+
 Refreshed after record-screen polish **2026-10-13 (America/Chicago)** from the rebuilt test-scope demo using
 packaged Next UI 1.0.0-RC.14 and connected Edge through the browser screenshot
 and viewport tools. All files are JPEG viewport captures, below 300 KB each.

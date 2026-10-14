@@ -57,7 +57,7 @@ public class MemorySealedStore implements SealedStore
     ** Refuse overwrites and retain the exact bytes.
     *******************************************************************************/
    @Override
-   public String put(String key, Path file, Instant until) throws Exception
+   public String put(String key, Path file, com.kingsrook.qbits.objectstorage.api.LockMode mode, Instant until) throws Exception
    {
       if(objects.containsKey(key))
       {
@@ -65,7 +65,7 @@ public class MemorySealedStore implements SealedStore
       }
       String version = "v" + (objects.size() + 1);
       objects.put(key, Files.readAllBytes(file));
-      heads.put(key, new StoredObject().withKey(key).withVersionId(version).withLockMode("COMPLIANCE").withLockRetainUntil(until));
+      heads.put(key, new StoredObject().withKey(key).withVersionId(version).withLockMode(mode.name()).withLockRetainUntil(until));
       return (version);
    }
 

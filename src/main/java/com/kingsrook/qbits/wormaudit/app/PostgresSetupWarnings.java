@@ -49,6 +49,11 @@ public final class PostgresSetupWarnings
    public static List<String> load(QBackendTransaction transaction, WormAuditQBitConfig config)
    {
       List<String> warnings = new ArrayList<>();
+      int years = config.effectiveSettings().audit_retention_years();
+      if(years != config.getRetentionYears())
+      {
+         warnings.add("Audit retention setting differs from the configured database purge interval (" + config.getRetentionYears() + " years). A reviewed migration is required.");
+      }
       if(!(transaction instanceof RDBMSTransaction rdbms))
       {
          return (warnings);
@@ -60,8 +65,10 @@ public final class PostgresSetupWarnings
          {
             return (warnings);
          }
+         // The live function is authoritative on PostgreSQL, rather than the renderer defaults.
+         warnings.clear();
          List<String> tables = new ArrayList<>(config.getCoreAuditTableNames().values());
-         tables.addAll(WormAuditTables.ALL);
+         tables.addAll(WormAuditTables.ALL.stream().filter(t -> !WormAuditTables.SETTINGS.equals(t)).toList());
          for(String table : tables)
          {
             for(String trigger : List.of("worm_audit_row_guard", "worm_audit_truncate_guard"))
@@ -90,6 +97,17 @@ public final class PostgresSetupWarnings
                   {
                      warnings.add("Runtime role owns audit table " + table);
                   }
+               }
+            }
+         }
+         try(var statement = connection.createStatement(); var result = statement.executeQuery("SELECT pg_get_functiondef(to_regprocedure('public.worm_audit_purge(timestamp with time zone)'))"))
+         {
+            if(result.next() && result.getString(1) != null)
+            {
+               var interval = java.util.regex.Pattern.compile("(?i)interval\\s+'([0-9]+) years'").matcher(result.getString(1));
+               if(interval.find() && Integer.parseInt(interval.group(1)) != years)
+               {
+                  warnings.add("Audit retention setting differs from the purge function's compiled interval (" + interval.group(1) + " years). A reviewed migration is required.");
                }
             }
          }

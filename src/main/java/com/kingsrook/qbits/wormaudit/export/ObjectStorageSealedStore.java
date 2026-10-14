@@ -29,7 +29,6 @@ import java.time.Instant;
 import com.kingsrook.qbits.objectstorage.api.Capability;
 import com.kingsrook.qbits.objectstorage.api.CapabilityStatus;
 import com.kingsrook.qbits.objectstorage.api.ListRequest;
-import com.kingsrook.qbits.objectstorage.api.LockMode;
 import com.kingsrook.qbits.objectstorage.api.ObjectStorage;
 import com.kingsrook.qbits.objectstorage.api.ObjectSummary;
 import com.kingsrook.qbits.objectstorage.api.Page;
@@ -84,12 +83,12 @@ public class ObjectStorageSealedStore implements SealedStore
     ** Stream a bounded upload and close the source even when the provider fails.
     *******************************************************************************/
    @Override
-   public String put(String key, Path file, Instant retainUntil) throws Exception
+   public String put(String key, Path file, com.kingsrook.qbits.objectstorage.api.LockMode mode, Instant retainUntil) throws Exception
    {
       try(InputStream input = Files.newInputStream(file))
       {
          return (bucket.put(PutRequest.of(key, input).withContentLength(Files.size(file))
-            .withObjectLock(LockMode.COMPLIANCE, retainUntil)).getVersionId());
+            .withObjectLock(mode, retainUntil)).getVersionId());
       }
    }
 

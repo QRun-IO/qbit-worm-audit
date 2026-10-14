@@ -324,3 +324,30 @@ CREATE INDEX IF NOT EXISTS worm_audit_chain_detail_coverage ON public.worm_audit
 DROP TRIGGER IF EXISTS worm_audit_detail_coverage_guard ON public.worm_audit_chain;
 CREATE TRIGGER worm_audit_detail_coverage_guard BEFORE INSERT ON public.worm_audit_chain
    FOR EACH ROW EXECUTE FUNCTION public.worm_audit_detail_coverage();
+
+-- changeset worm-audit:10
+-- Editable singleton: deliberately excluded from append-only triggers.
+CREATE TABLE IF NOT EXISTS public.worm_audit_settings (
+   id integer PRIMARY KEY CHECK (id = 1),
+   audit_retention_years integer NOT NULL DEFAULT 6 CHECK (audit_retention_years BETWEEN 1 AND 100),
+   export_lock_mode text NOT NULL DEFAULT 'GOVERNANCE' CHECK (export_lock_mode IN ('GOVERNANCE', 'COMPLIANCE')),
+   export_retention_days integer NOT NULL DEFAULT 30 CHECK (export_retention_days BETWEEN 1 AND 36500),
+   checkpoint_every_links integer NOT NULL DEFAULT 10000 CHECK (checkpoint_every_links > 0),
+   checkpoint_every_minutes integer NOT NULL DEFAULT 60 CHECK (checkpoint_every_minutes > 0),
+   chain_interval_seconds integer NOT NULL DEFAULT 30 CHECK (chain_interval_seconds > 0),
+   settle_horizon_seconds integer NOT NULL DEFAULT 60 CHECK (settle_horizon_seconds >= 0),
+   late_detail_lookback_hours integer NOT NULL DEFAULT 24 CHECK (late_detail_lookback_hours > 0),
+   export_cron text NOT NULL DEFAULT '0 0 2 * * ?',
+   verify_cron text NOT NULL DEFAULT '0 0 3 * * ?',
+   notes text,
+   modify_date timestamptz NOT NULL DEFAULT now(),
+   modified_by text NOT NULL DEFAULT current_user
+);
+REVOKE DELETE, TRUNCATE ON public.worm_audit_settings FROM ${app_role};
+GRANT SELECT, INSERT, UPDATE ON public.worm_audit_settings TO ${app_role};
+INSERT INTO public.worm_audit_settings
+   (id, audit_retention_years, export_lock_mode, export_retention_days, checkpoint_every_links,
+    checkpoint_every_minutes, chain_interval_seconds, settle_horizon_seconds, late_detail_lookback_hours,
+    export_cron, verify_cron)
+SELECT ${settings_values}
+WHERE NOT EXISTS (SELECT 1 FROM public.worm_audit_settings WHERE id = 1);
