@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS public.worm_audit_export (
    to_checkpoint_id bigint,
    bucket_alias text,
    object_prefix text,
+   object_versions text,
    manifest_key text,
    manifest_sha256 text,
    prev_manifest_sha256 text,
