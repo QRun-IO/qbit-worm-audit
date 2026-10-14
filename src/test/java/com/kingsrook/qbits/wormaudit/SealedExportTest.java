@@ -296,7 +296,7 @@ class SealedExportTest
    void rangeSelectionNoCheckpointContiguousAndPurgeAnchor() throws Exception
    {
       assertThat(new SealedExporter(config, storage).run("SCHEDULE", NOW).message()).isEqualTo("Nothing to seal: no new checkpoint");
-      assertThat(ProcessesAndAlertsTest.Sink.beats).containsExactly("worm_audit.export.daily");
+      assertThat(ProcessesAndAlertsTest.Sink.beats).containsExactly("wormaudit.export.daily");
       audit(1);
       QRecord first = seal();
       assertThat(new SealedExporter(config, storage).run("USER", NOW).row()).isNull();
@@ -492,7 +492,7 @@ class SealedExportTest
       new WormAuditChainer(config).chainOnce(NOW);
       new ExportProcesses.Daily().run(input, output);
       assertThat(output.getValueString("outcome")).isEqualTo("FAIL");
-      assertThat(ProcessesAndAlertsTest.Sink.beats).contains("worm_audit.export.daily");
+      assertThat(ProcessesAndAlertsTest.Sink.beats).contains("wormaudit.export.daily");
       new ExportProcesses.ExportLoad();
       new ExportProcesses.VerifyLoad();
    }

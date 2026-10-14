@@ -21,20 +21,22 @@
 package com.kingsrook.qbits.wormaudit;
 
 
+import java.util.List;
+import com.kingsrook.qbits.wormaudit.app.WormAuditApp;
 import com.kingsrook.qbits.wormaudit.ddl.WormAuditDdl;
 import com.kingsrook.qbits.wormaudit.guard.AppendOnlyGuard;
 import com.kingsrook.qbits.wormaudit.model.LinkRangeWidget;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
 import com.kingsrook.qbits.wormaudit.processes.ExportProcesses;
 import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
+import com.kingsrook.qqq.backend.core.alerts.AlertDefaultMonitor;
+import com.kingsrook.qqq.backend.core.alerts.AlertSeverity;
+import com.kingsrook.qqq.backend.core.alerts.QAlertTypeMetaData;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
 import com.kingsrook.qqq.backend.core.model.metadata.MetaDataProducerMultiOutput;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
 import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
 import com.kingsrook.qqq.backend.core.model.metadata.dashboard.QWidgetMetaData;
-import com.kingsrook.qqq.backend.core.model.metadata.layout.QAppMetaData;
-import com.kingsrook.qqq.backend.core.model.metadata.layout.QAppSection;
-import com.kingsrook.qqq.backend.core.model.metadata.layout.QIcon;
 import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValueSource;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaDataProducer;
@@ -150,6 +152,14 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
          {
             table = qBitConfig.getTableMetaDataCustomizer().customizeMetaData(qInstance, table);
          }
+         for(var field : table.getFields().values())
+         {
+            if(field.getInlinePossibleValueSource() != null)
+            {
+               output.add(field.getInlinePossibleValueSource());
+               field.withPossibleValueSourceName(field.getInlinePossibleValueSource().getName()).withInlinePossibleValueSource(null);
+            }
+         }
          guard.customizeMetaData(qInstance, table);
          table.setSourceQBitName(qBit.getName());
          output.add(table);
@@ -160,11 +170,16 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
       }
       for(String name : WormAuditTables.ALL)
       {
-         output.add(QPossibleValueSource.newForTable(name));
+         QPossibleValueSource source = QPossibleValueSource.newForTable(name);
+         if(WormAuditTables.CHAIN.equals(name))
+         {
+            source.withValueFormat("%s").withValueFields(java.util.List.of("id"));
+         }
+         output.add(source);
       }
       for(String name : java.util.List.of(WormAuditTables.CHECKPOINT, WormAuditTables.EXPORT, WormAuditTables.VERIFICATION))
       {
-         output.add(new QWidgetMetaData().withName(name + "_links").withLabel("Chain links").withType("childRecordList")
+         output.add(new QWidgetMetaData().withName(name + "_links").withLabel("Chain links").withType("childRecordList").withGridColumns(12)
             .withCodeReference(new QCodeReference(LinkRangeWidget.class)).withDefaultValue("parentTable", name));
       }
       for(var process : WormAuditProcesses.processes(qBitConfig))
@@ -181,15 +196,28 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
       {
          qInstance.addScheduler(new QuartzSchedulerMetaData().withName(qBitConfig.getSchedulerName()));
       }
-      QAppMetaData app = new QAppMetaData().withName("worm_audit").withLabel("WORM Audit").withIcon(new QIcon("policy"));
-      for(String name : WormAuditTables.NAV)
+      output.add(WormAuditApp.app(qBitConfig, output.getEach(QTableMetaData.class)));
+      for(QWidgetMetaData widget : WormAuditApp.widgets())
       {
-         QTableMetaData table = output.getEach(QTableMetaData.class).stream().filter(t -> t.getName().equals(name)).findFirst().orElseThrow();
-         app.withSectionOfChildren(new QAppSection().withName(name).withLabel(table.getLabel()), table);
+         output.add(widget);
       }
-      output.add(app);
-      // RC.5 rejects underscores in declared alert type names. QAlerts still
-      // dispatches the specified worm_audit.chain.break signal to installed sinks.
+      output.add(new QAlertTypeMetaData().withName("wormaudit.chain.break").withLabel("Audit chain break")
+         .withSourceQBitName(qBit.getName()).withDefaultSeverity(AlertSeverity.CRITICAL)
+         .withDescription("Audit chain verification found a break in content, continuity, coverage or checkpoint trust.")
+         .withSubjectTableName(WormAuditTables.VERIFICATION).withVisibilityPermission("worm_audit_verification.read"));
+      output.add(new QAlertTypeMetaData().withName("wormaudit.export.failed").withLabel("Sealed audit export failed")
+         .withSourceQBitName(qBit.getName()).withDefaultSeverity(AlertSeverity.ERROR)
+         .withDescription("The audit export could not be sealed with verified retention and object versions.")
+         .withSubjectTableName(WormAuditTables.EXPORT).withVisibilityPermission("worm_audit_export.read"));
+      for(String job : List.of("verify", "export"))
+      {
+         String name = "wormaudit." + job + ".daily";
+         output.add(new QAlertTypeMetaData().withName(name).withLabel("Daily audit " + job + " overdue")
+            .withSourceQBitName(qBit.getName()).withDefaultSeverity(AlertSeverity.ERROR)
+            .withDescription("The daily audit " + job + " job has not sent a heartbeat within 26 hours.")
+            .withVisibilityPermission(job.equals("verify") ? "worm_audit_verification.read" : "worm_audit_export.read")
+            .withDefaultMonitor(AlertDefaultMonitor.heartbeat(name, name, 24 * 3600, 2 * 3600)));
+      }
       output.addSelfToInstance(qInstance);
       denyAssistant(qInstance);
       return (new MetaDataProducerMultiOutput());

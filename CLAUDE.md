@@ -29,8 +29,8 @@ Package: `com.kingsrook.qbits.wormaudit`. Entry point: `WormAuditQBitProducer im
 
 PostgreSQL uses a transaction advisory lock; other backends require a single writer JVM.
 Use `./mvnw.cmd -o verify` offline. PostgreSQL tests skip without Docker locally, but fail whenever `CI` is set.
-Core RC.5 has no assistant deny API (reflective registration) and disallows underscores in declared alert-type metadata;
-signals retain the required `worm_audit.chain.break` name and dispatch through QAlerts without that declaration.
+Core RC.5 has no assistant deny API (reflective registration). Alert types use the
+`wormaudit.*` namespace and are declared through core alert-type metadata.
 
 ## Invariants and naming
 

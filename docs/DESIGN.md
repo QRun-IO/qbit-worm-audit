@@ -104,7 +104,9 @@ runtime role owns the audit tables (checked through `pg_tables.tableowner = curr
 The qbit ships `src/main/resources/com/kingsrook/qbits/wormaudit/ddl/postgres/worm-audit.sql`,
 a Liquibase formatted-SQL template with placeholders for the four core audit table names, the
 app role and the retention interval, plus a renderer (`WormAuditDdl.postgres(config)`) and the
-rendered default (`docs/ddl/worm-audit-postgres.sql`, snake_case names). Hosts copy the rendered
+rendered default (`docs/ddl/worm-audit-postgres.sql`, snake_case names). Core audit physical
+columns must use snake_case (for example `audit_table_id`, `audit_id`, `new_value`); hosts map
+QQQ field names to those columns. Hosts copy the rendered
 file into their changelog (kof22: `changesets/features/YYYY-MM-DD-worm-audit.sql`). It creates the
 qbit tables, the functions, the triggers, the purger role (`CREATE ROLE ... NOLOGIN` when it is
 missing) and the grants. It is idempotent (`CREATE OR REPLACE`, `DROP TRIGGER IF EXISTS`).
@@ -217,9 +219,9 @@ standard streamed ETL:
   does not verify".
 
 **Daily verification**: a scheduled job runs the same verifier at 03:00. A failure raises
-`QAlerts.raise(new AlertSignal("worm_audit.chain.break").withDedupKey("chain")...)` with the first
+`QAlerts.raise(new AlertSignal("wormaudit.chain.break").withDedupKey("chain")...)` with the first
 break in the title and the verification record as the record ref; a later pass resolves it. Every
-run sends `QAlerts.heartbeat("worm_audit.verify.daily")`. `QAlerts` is the core producer SPI
+run sends `QAlerts.heartbeat("wormaudit.verify.daily")`. `QAlerts` is the core producer SPI
 (QQQ 4.1.0-RC.5), so the qbit needs no dependency on qbit-alerts. With no alerts implementation
 installed the alerts go to the log.
 
@@ -236,14 +238,17 @@ Daily at 02:00 (configurable), and by the table action "Export now" on `worm_aud
      the previous export's manifest SHA-256 (the exports form their own chain), qbit version.
 3. Each object is put through qbit-object-storage (`SystemStorage`, bucket alias from config,
    default `worm_audit`) with `LockMode.COMPLIANCE` and `retainUntil = now + retentionYears`. The
-   export refuses to run, and alerts `worm_audit.export.failed`, when the bucket does not report
+   export refuses to run, and alerts `wormaudit.export.failed`, when the bucket does not report
    the `OBJECT_LOCK` capability or the put does not echo the lock.
 4. On success it inserts one `worm_audit_export` row (insert-only; a failed export leaves no row,
-   and its alert carries the reason).
+   and its alert carries the reason). Every scheduled run sends `wormaudit.export.daily`.
 
 ### 6.2 Restore and verify a sealed export
 "Verify sealed export", a record action on `worm_audit_export` (standard ETL), downloads the
-objects. It checks the manifest hashes, the lock mode and retain-until of each object, the link
+exact object versions pinned in the catalog's `object_versions` map. A new version under an
+existing key is an overwrite even when bytes and retention match: verification checks the latest
+version against the pin and rejects replacements, then reads and checks the pinned version.
+It checks the manifest hashes, the lock mode and retain-until of each object, the link
 hashes recomputed from the exported content, the checkpoint signatures, and the export's link to
 the previous manifest. Then it compares each exported link and content document with the live
 chain and the live audit rows. Result lines name each difference ("link 88,412: live content
@@ -265,7 +270,7 @@ events integrations care about); chain links are high-volume and publish none.
 - **`worm_audit_checkpoint`** [Checkpoint]: `id`, `from_link_id`, `to_link_id`, `link_count`,
   `head_hash`, `merkle_root`, `algorithm`, `key_id`, `public_key`, `signature`, `created_at`.
 - **`worm_audit_export`** [Sealed Export]: `id`, `from_link_id`, `to_link_id`,
-  `from_checkpoint_id`, `to_checkpoint_id`, `bucket_alias`, `object_prefix`, `manifest_key`,
+  `from_checkpoint_id`, `to_checkpoint_id`, `bucket_alias`, `object_prefix`, `object_versions`, `manifest_key`,
   `manifest_sha256`, `prev_manifest_sha256`, `object_count`, `byte_count`, `lock_mode`,
   `retain_until`, `sealed_at`.
 - **`worm_audit_verification`** [Verification]: `id`, `kind` (CHAIN, SEALED_EXPORT), `trigger`
@@ -341,7 +346,7 @@ registers as a `MiddlewareSpecExtension` under `/qqq/v1/qbit/worm-audit/...`
    qbit's tests until the core hook ships), the audit header, the details (old, new, message),
    the canonical content and the export JSONL contain neither the canary nor any substring of it
    longer than 4 characters.
-6. **Alerts**: a break raises `worm_audit.chain.break` through `QAlerts` (captured by a test
+6. **Alerts**: a break raises `wormaudit.chain.break` through `QAlerts` (captured by a test
    sink); a later pass resolves it.
 7. Coverage gates: 70% instructions, 90% classes.
 
@@ -367,7 +372,7 @@ registers as a `MiddlewareSpecExtension` under `/qqq/v1/qbit/worm-audit/...`
 - **Bucket:** `kof22-worm-audit` on the kof22 MinIO, created by `minio-bucket-init` with
   `mc mb --with-lock --ignore-existing` and `mc retention set --default COMPLIANCE 6y`. Object
   Lock can only be enabled at bucket creation.
-- **Policy:** `kof22-app` gets `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`,
+- **Policy:** `kof22-app` gets `s3:PutObject`, `s3:GetObject`, `s3:GetObjectVersion`, `s3:ListBucket`,
   `s3:GetObjectRetention`, `s3:PutObjectRetention` (needed to set the lock on each put),
   `s3:GetBucketObjectLockConfiguration` on that bucket. No delete, and no
   `s3:BypassGovernanceRetention` (irrelevant under COMPLIANCE anyway).

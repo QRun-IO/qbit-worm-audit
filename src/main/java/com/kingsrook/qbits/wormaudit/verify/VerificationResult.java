@@ -41,11 +41,29 @@ public class VerificationResult
 
    private final List<Break> breaks = new ArrayList<>();
    private final List<String> warnings = new ArrayList<>();
-   private final Instant startedAt = Instant.now();
+   private final Instant startedAt;
    private long breakCount;
    private long linksChecked;
    private Long fromLinkId;
    private Long toLinkId;
+
+   /*******************************************************************************
+    ** Use the production clock by default.
+    *******************************************************************************/
+   public VerificationResult()
+   {
+      this(Instant.now());
+   }
+
+
+   /*******************************************************************************
+    ** Bind the verification start to the caller's clock.
+    *******************************************************************************/
+   public VerificationResult(Instant startedAt)
+   {
+      this.startedAt = startedAt;
+   }
+
 
    /*******************************************************************************
     ** Add a finding in deterministic verification order.

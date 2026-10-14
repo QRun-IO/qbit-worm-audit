@@ -85,6 +85,38 @@ class ProcessesAndAlertsTest
    }
 
    /*******************************************************************************
+    ** RC.5 validates declared severities, names and daily heartbeat expectations.
+    *******************************************************************************/
+   @Test
+   void alertTypesAndDailyMonitors() throws Exception
+   {
+      var instance = init(new WormAuditQBitConfig());
+      new com.kingsrook.qqq.backend.core.instances.QInstanceValidator().validate(instance);
+      assertThat(new com.kingsrook.qbits.wormaudit.chain.AuditStore(null).isMemory()).isTrue();
+      var types = AlertsInstanceMetaData.of(instance).getAlertTypes();
+      assertThat(types).containsOnlyKeys("wormaudit.chain.break", "wormaudit.export.failed", "wormaudit.verify.daily", "wormaudit.export.daily");
+      assertThat(types.get("wormaudit.chain.break").getDefaultSeverity())
+         .isEqualTo(com.kingsrook.qqq.backend.core.alerts.AlertSeverity.CRITICAL);
+      assertThat(types.get("wormaudit.export.failed").getDefaultSeverity())
+         .isEqualTo(com.kingsrook.qqq.backend.core.alerts.AlertSeverity.ERROR);
+      types.values().forEach(type ->
+      {
+         assertThat(type.getLabel()).isNotBlank();
+         assertThat(type.getDescription()).isNotBlank();
+         assertThat(AlertsInstanceMetaData.ALERT_TYPE_NAME_PATTERN.matcher(type.getName()).matches()).isTrue();
+      });
+      for(String name : List.of("wormaudit.verify.daily", "wormaudit.export.daily"))
+      {
+         var monitors = types.get(name).getDefaultMonitors();
+         assertThat(monitors).hasSize(1);
+         assertThat(monitors.getFirst().getKind()).isEqualTo(com.kingsrook.qqq.backend.core.alerts.AlertMonitorKind.HEARTBEAT);
+         assertThat(monitors.getFirst().getDefinition()).containsEntry("heartbeatKey", name)
+            .containsEntry("expectedEverySeconds", 86400).containsEntry("graceSeconds", 7200);
+      }
+   }
+
+
+   /*******************************************************************************
     ** Verify daily raise resolve heartbeat and user result.
     *******************************************************************************/
    @Test
@@ -106,7 +138,7 @@ class ProcessesAndAlertsTest
       daily.run(new RunBackendStepInput(), output);
       assertThat(output.getValueString("outcome")).isEqualTo("FAIL");
       assertThat(Sink.raised).hasSize(1);
-      assertThat(Sink.raised.getFirst().getAlertTypeName()).isEqualTo("worm_audit.chain.break");
+      assertThat(Sink.raised.getFirst().getAlertTypeName()).isEqualTo("wormaudit.chain.break");
       assertThat(Sink.raised.getFirst().getDedupKey()).isEqualTo("chain");
       assertThat(Sink.raised.getFirst().getRecordRefs().getFirst().getTableName())
             .isEqualTo(WormAuditTables.VERIFICATION);
@@ -119,7 +151,7 @@ class ProcessesAndAlertsTest
       daily.run(new RunBackendStepInput(), new RunBackendStepOutput());
       assertThat(Sink.resolved).hasSize(1);
       assertThat(Sink.beats)
-            .containsExactly("worm_audit.verify.daily", "worm_audit.verify.daily");
+            .containsExactly("wormaudit.verify.daily", "wormaudit.verify.daily");
       assertThat(STORE.all(WormAuditTables.VERIFICATION)).hasSize(2);
       assertThat(VerificationRuns.run(null, "USER").passed()).isTrue();
       assertThat(Sink.beats).hasSize(2);

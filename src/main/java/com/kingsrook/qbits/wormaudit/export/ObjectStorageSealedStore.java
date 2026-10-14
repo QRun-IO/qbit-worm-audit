@@ -71,6 +71,16 @@ public class ObjectStorageSealedStore implements SealedStore
 
 
    /*******************************************************************************
+    ** Report the provider capability without collapsing UNKNOWN into UNSUPPORTED.
+    *******************************************************************************/
+   @Override
+   public CapabilityStatus lockCapability()
+   {
+      return (bucket.capability(Capability.OBJECT_LOCK));
+   }
+
+
+   /*******************************************************************************
     ** Stream a bounded upload and close the source even when the provider fails.
     *******************************************************************************/
    @Override

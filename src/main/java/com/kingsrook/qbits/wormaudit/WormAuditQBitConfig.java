@@ -25,6 +25,7 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.util.Map;
 import java.util.function.Supplier;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.kingsrook.qqq.backend.core.model.metadata.producers.MetaDataCustomizerInterface;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitConfig;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
@@ -44,6 +45,11 @@ public class WormAuditQBitConfig implements QBitConfig
    {
    }
 
+   private String appName = "worm_audit";
+   private String appLabel = "WORM Audit";
+   private String parentAppName;
+   private String tablePathPrefix = "/app";
+   private Supplier<com.kingsrook.qbits.wormaudit.export.SealedStore> sealedStoreSupplier;
    private String backendName = null;
    private int retentionYears = 6;
    private Supplier<SigningKey> signingKey = null;
@@ -62,6 +68,102 @@ public class WormAuditQBitConfig implements QBitConfig
    private Map<String, String> coreAuditTableNames = Map.of();
    private String appRole = "app";
    private MetaDataCustomizerInterface<QTableMetaData> tableMetaDataCustomizer = null;
+
+
+   /*******************************************************************************
+    ** Read the app name.
+    *******************************************************************************/
+   public String getAppName()
+   {
+      return (appName);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the app name.
+    *******************************************************************************/
+   public WormAuditQBitConfig withAppName(String appName)
+   {
+      this.appName = appName;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the app label.
+    *******************************************************************************/
+   public String getAppLabel()
+   {
+      return (appLabel);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the app label.
+    *******************************************************************************/
+   public WormAuditQBitConfig withAppLabel(String appLabel)
+   {
+      this.appLabel = appLabel;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the optional parent app.
+    *******************************************************************************/
+   public String getParentAppName()
+   {
+      return (parentAppName);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the optional parent app.
+    *******************************************************************************/
+   public WormAuditQBitConfig withParentAppName(String parentAppName)
+   {
+      this.parentAppName = parentAppName;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the table route prefix.
+    *******************************************************************************/
+   public String getTablePathPrefix()
+   {
+      return (tablePathPrefix);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the table route prefix.
+    *******************************************************************************/
+   public WormAuditQBitConfig withTablePathPrefix(String tablePathPrefix)
+   {
+      this.tablePathPrefix = tablePathPrefix;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the optional storage boundary (defaults to qbit-object-storage).
+    *******************************************************************************/
+   @JsonIgnore
+   public Supplier<com.kingsrook.qbits.wormaudit.export.SealedStore> getSealedStoreSupplier()
+   {
+      return (sealedStoreSupplier);
+   }
+
+
+   /*******************************************************************************
+    ** Configure the optional storage boundary (defaults to qbit-object-storage).
+    *******************************************************************************/
+   public WormAuditQBitConfig withSealedStoreSupplier(Supplier<com.kingsrook.qbits.wormaudit.export.SealedStore> sealedStoreSupplier)
+   {
+      this.sealedStoreSupplier = sealedStoreSupplier;
+      return (this);
+   }
 
 
    /*******************************************************************************
@@ -105,6 +207,7 @@ public class WormAuditQBitConfig implements QBitConfig
    /*******************************************************************************
     ** Read signingKey.
     *******************************************************************************/
+   @JsonIgnore
    public Supplier<SigningKey> getSigningKey()
    {
       return (signingKey);
@@ -124,6 +227,7 @@ public class WormAuditQBitConfig implements QBitConfig
    /*******************************************************************************
     ** Read trustedPublicKeys.
     *******************************************************************************/
+   @JsonIgnore
    public Map<String, PublicKey> getTrustedPublicKeys()
    {
       return (trustedPublicKeys);
@@ -412,6 +516,12 @@ public class WormAuditQBitConfig implements QBitConfig
     *******************************************************************************/
    public void validate()
    {
+      if(appName == null || !appName.matches("[A-Za-z0-9_-]+") || appLabel == null || appLabel.isBlank()
+         || (parentAppName != null && !parentAppName.matches("[A-Za-z0-9_-]+"))
+         || tablePathPrefix == null || !tablePathPrefix.matches("/[A-Za-z0-9_/-]*") || tablePathPrefix.endsWith("/"))
+      {
+         throw (new IllegalArgumentException("App names and a local table path prefix are required"));
+      }
       if(exportBucketAlias == null || exportBucketAlias.isBlank() || exportCron == null || exportCron.isBlank()
          || exportPrefix == null || !exportPrefix.matches("[A-Za-z0-9_-]+(/[A-Za-z0-9_-]+)*"))
       {

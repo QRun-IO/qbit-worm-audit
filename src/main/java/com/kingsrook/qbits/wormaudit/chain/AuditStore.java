@@ -44,10 +44,12 @@ import com.kingsrook.qbits.wormaudit.guard.AppendOnlyGuard;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
 import com.kingsrook.qbits.wormaudit.verify.VerificationResult;
 import com.kingsrook.qqq.backend.core.actions.QBackendTransaction;
+import com.kingsrook.qqq.backend.core.actions.tables.CountAction;
 import com.kingsrook.qqq.backend.core.actions.tables.InsertAction;
 import com.kingsrook.qqq.backend.core.actions.tables.QueryAction;
 import com.kingsrook.qqq.backend.core.context.QContext;
 import com.kingsrook.qqq.backend.core.exceptions.QException;
+import com.kingsrook.qqq.backend.core.model.actions.tables.count.CountInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.insert.InsertInput;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QCriteriaOperator;
 import com.kingsrook.qqq.backend.core.model.actions.tables.query.QFilterCriteria;
@@ -88,6 +90,57 @@ public class AuditStore
       QueryInput input = new QueryInput(table).withFilter(filter).withTransaction(transaction).withShouldFetchHeavyFields(true);
       input.withPermissionBypass("WORM audit internal read");
       return (new QueryAction().execute(input).getRecords());
+   }
+
+
+   /*******************************************************************************
+    ** Project only summary fields; home reads never fetch audit content.
+    *******************************************************************************/
+   public List<QRecord> summary(String table, QQueryFilter filter, Set<String> fields) throws QException
+   {
+      QueryInput input = new QueryInput(table).withFilter(filter).withTransaction(transaction)
+         .withFieldNamesToInclude(fields).withShouldFetchHeavyFields(true);
+      input.withPermissionBypass("WORM audit home summary after widget permission check");
+      return (new QueryAction().execute(input).getRecords());
+   }
+
+
+   /*******************************************************************************
+    ** Aggregate counts avoid loading the live chain for the home.
+    *******************************************************************************/
+   public long count(String table, QQueryFilter filter) throws QException
+   {
+      CountInput input = new CountInput(table).withFilter(filter).withTransaction(transaction);
+      input.withPermissionBypass("WORM audit home count after widget permission check");
+      return (new CountAction().execute(input).getCount());
+   }
+
+
+   /*******************************************************************************
+    ** Count the same AUDIT anti-join as the writer, split at the settle horizon.
+    *******************************************************************************/
+   public long unchainedCount(Instant cutoff, boolean settled) throws QException
+   {
+      if(isRdbms())
+      {
+         String sql = "SELECT count(*) FROM " + physical("audit") + " a WHERE a." + column("audit", "timestamp")
+            + (settled ? " < ?" : " >= ?") + unchainedPredicate();
+         return (sqlIds(sql, cutoff).getFirst());
+      }
+      Set<Long> covered = summary(WormAuditTables.CHAIN, new QQueryFilter(new QFilterCriteria("kind", QCriteriaOperator.EQUALS, "AUDIT")), Set.of("audit_id"))
+         .stream().map(r -> r.getValueLong("audit_id")).collect(Collectors.toSet());
+      return (summary("audit", new QQueryFilter(), Set.of("id", "timestamp")).stream()
+         .filter(r -> r.getValueInstant("timestamp") != null && r.getValueInstant("timestamp").isBefore(cutoff) == settled
+            && !covered.contains(r.getValueLong("id"))).count());
+   }
+
+
+   /*******************************************************************************
+    ** Shared SQL coverage predicate for both writer selection and home counts.
+    *******************************************************************************/
+   private String unchainedPredicate()
+   {
+      return (" AND NOT EXISTS (SELECT 1 FROM worm_audit_chain c WHERE c.audit_id=a." + column("audit", "id") + " AND c.kind='AUDIT')");
    }
 
 
@@ -219,8 +272,7 @@ public class AuditStore
       if(isRdbms())
       {
          String sql = "SELECT a." + column("audit", "id") + " FROM " + physical("audit") + " a WHERE a." + column("audit", "timestamp")
-            + " < ? AND NOT EXISTS (SELECT 1 FROM worm_audit_chain c WHERE c.audit_id=a." + column("audit", "id")
-            + " AND c.kind='AUDIT') ORDER BY a." + column("audit", "timestamp") + ", a." + column("audit", "id") + " LIMIT " + limit;
+            + " < ?" + unchainedPredicate() + " ORDER BY a." + column("audit", "timestamp") + ", a." + column("audit", "id") + " LIMIT " + limit;
          Map<Long, QRecord> rows = index(in("audit", "id", sqlIds(sql, cutoff)));
          return (rows.values().stream().sorted(Comparator.comparing((QRecord r) -> r.getValueInstant("timestamp"))
             .thenComparing(r -> r.getValueLong("id"))).toList());
@@ -248,6 +300,15 @@ public class AuditStore
    public boolean isRdbms()
    {
       return (transaction instanceof RDBMSTransaction);
+   }
+
+
+   /*******************************************************************************
+    ** Only the in-memory backend may use an unbounded completeness index.
+    *******************************************************************************/
+   public boolean isMemory()
+   {
+      return ("memory".equals(QContext.getQInstance().getBackendForTable(WormAuditTables.CHAIN).getBackendType()));
    }
 
 

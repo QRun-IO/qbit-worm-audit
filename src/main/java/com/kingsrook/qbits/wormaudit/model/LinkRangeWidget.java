@@ -81,6 +81,7 @@ public class LinkRangeWidget extends AbstractWidgetRenderer
       String path = QContext.getQInstance().getTablePath(WormAuditTables.CHAIN);
       String viewAll = path + "?filter=" + URLEncoder.encode(JsonUtils.toJson(filter), StandardCharsets.UTF_8);
       QueryInput query = new QueryInput(WormAuditTables.CHAIN).withFilter(filter.clone().withLimit(100)).withInputSource(QInputSource.USER);
+      query.withShouldTranslatePossibleValues(true);
       query.withPermissionEnforcement(PermissionEnforcement.ENFORCE);
       return (new RenderWidgetOutput(new ChildRecordListData("Chain links", new QueryAction().execute(query),
          QContext.getQInstance().getTable(WormAuditTables.CHAIN), path, viewAll, total)));

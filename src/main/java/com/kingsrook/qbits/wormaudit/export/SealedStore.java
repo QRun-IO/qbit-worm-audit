@@ -24,6 +24,7 @@ package com.kingsrook.qbits.wormaudit.export;
 import java.io.InputStream;
 import java.nio.file.Path;
 import java.time.Instant;
+import com.kingsrook.qbits.objectstorage.api.CapabilityStatus;
 import com.kingsrook.qbits.objectstorage.api.ListRequest;
 import com.kingsrook.qbits.objectstorage.api.ObjectSummary;
 import com.kingsrook.qbits.objectstorage.api.Page;
@@ -39,6 +40,14 @@ public interface SealedStore
     ** Only positively confirmed Object Lock support is acceptable.
     *******************************************************************************/
    boolean supportsLock();
+
+   /*******************************************************************************
+    ** Preserve unknown provider capabilities for read-only setup diagnostics.
+    *******************************************************************************/
+   default CapabilityStatus lockCapability()
+   {
+      return (supportsLock() ? CapabilityStatus.SUPPORTED : CapabilityStatus.UNSUPPORTED);
+   }
 
    /*******************************************************************************
     ** Upload a file with COMPLIANCE retention.
