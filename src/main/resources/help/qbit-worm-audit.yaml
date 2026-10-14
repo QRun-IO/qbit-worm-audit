@@ -1,0 +1,45 @@
+bundle: qbit-worm-audit
+version: 1
+layer: QBIT
+# Help for the WORM Audit app and every worm_audit_* table, in the QQQ help-bundle
+# format (qqq#1198). Each table entry says what the table is for and how its rows
+# get created, so an empty table explains itself. WormAuditHelp applies it until
+# the core HelpBundles registry ships in a QQQ release
+# (STAND-IN(core=QRun-IO/qqq#1198, removeBy=4.1.0-RC.7)). Summaries stay under 120
+# characters. Only the settings table is seeded (by the database script, see the
+# README); every other table is written by the qbit's jobs and starts empty.
+entries:
+  - key: app:worm_audit;slot:help
+    summary: "Tamper-evident audit: a hash chain over every audit record, signed checkpoints, and sealed exports."
+    content: |
+      Install the database script (the Setup warnings on the home list what is missing) and the one settings row is created with it. Everything else fills by itself once the first audit record has settled: the chain job links records every 30 seconds by default, checkpoints follow, the daily job verifies and exports. Use Verify audit chain to check at any time.
+
+  - key: table:worm_audit_settings;slot:help
+    summary: "The one settings row: retention, export lock, checkpoint and chain cadence, and the job schedules."
+    content: |
+      **How rows get created:** the database script inserts the one row (ID 1) with the host's configured values, only when it is absent; it can never be added to or deleted. Edit record 1 to change a value; changes are audited and take effect within 30 seconds, except the schedules and chain interval, which need a restart. If the row is missing the qbit runs on the host's configured values, so nothing stops, but run the script to make them visible and editable here. Audit retention here is the next purge date only; the purge interval in the database changes through a reviewed migration.
+
+  - key: table:worm_audit_chain;slot:help
+    summary: "One link per core audit record: a hash that includes the previous link, so any change breaks the chain."
+    content: |
+      **How rows get created:** the Chain settled audit records job appends links for audit records older than the settle horizon (every 30 seconds by default, set in Settings). Nobody adds, edits or deletes a link; the database refuses. An empty table means no audit record has settled yet, or the chain job is not running.
+
+  - key: table:worm_audit_checkpoint;slot:help
+    summary: "Signed ranges of links (Ed25519), proving the chain's head at a point in time."
+    content: |
+      **How rows get created:** the chain job writes one after the configured number of links or minutes (Settings), signing the range. Sealed exports and verification check against them. An empty table means the chain is too short for a first checkpoint yet.
+
+  - key: table:worm_audit_export;slot:help
+    summary: "Sealed exports of chain ranges to object-lock storage, with their retention and manifest."
+    content: |
+      **How rows get created:** the Daily sealed audit export job (schedule in Settings) and the Export now action seal the links since the last export into the configured bucket, then record it here. Verify sealed export re-reads one. An empty table means no export has run: check the bucket setup warning on the home.
+
+  - key: table:worm_audit_verification;slot:help
+    summary: "Every run of the chain verification: what was checked and whether it passed or broke."
+    content: |
+      **How rows get created:** the Verify audit chain action and the Daily audit chain verification job (schedule in Settings) each add a row, with the first break found, if any. A break also raises an alert. An empty table means verification has not run yet.
+
+  - key: table:worm_audit_purge;slot:help
+    summary: "Record of each retention purge: the cutoff, what was removed and the new anchor link."
+    content: |
+      **How rows get created:** only the database's owner role can purge, by calling the purge function after the retention date has passed; the function writes this row. The application can never delete audit rows. An empty table means nothing has been purged, which is normal until records pass retention.

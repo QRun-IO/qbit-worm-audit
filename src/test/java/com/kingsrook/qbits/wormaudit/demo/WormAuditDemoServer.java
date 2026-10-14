@@ -176,7 +176,7 @@ public class WormAuditDemoServer extends AbstractQQQApplication
    public void seed(QInstance instance) throws Exception
    {
       QContext.init(instance, new QSession());
-      com.kingsrook.qbits.wormaudit.WormAuditSettings.seed(config);
+      com.kingsrook.qbits.wormaudit.WormAuditTestSupport.seedSettings(config);
       AuditStore store = new AuditStore(null);
       Instant today = Instant.now().minus(Duration.ofHours(2));
       try
