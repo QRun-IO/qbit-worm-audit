@@ -4,6 +4,10 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 
 ## [Unreleased]
 
+### Fixed
+
+- Startup on hosts whose default authentication requires a token (OAuth2, Auth0): `produce()` read the settings singleton under a plain tokenless `QSession`, which failed session validation (`JWTDecodeException: The token is null`) and stopped the host. The startup read now runs as the core `QSystemUserSession`, still honoring the persisted schedules. `TokenRequiredHostTest` runs production under a token-required test authentication module.
+
 ### Added
 
 - Foreign keys (`worm-audit:11-12`), `ON DELETE RESTRICT` only: chain link -> core audit header, sealed export -> its first and last checkpoints, export verification -> its export, with their indexes. Link references (ranges, break link, purge anchor) stay unconstrained because the retention purge deletes the links they outlive. Pre-existing orphans are copied to `qqq_fk_quarantine` (`KEPT`), never modified, and leave that constraint `NOT VALID`. Re-apply the rendered DDL (idempotent).
