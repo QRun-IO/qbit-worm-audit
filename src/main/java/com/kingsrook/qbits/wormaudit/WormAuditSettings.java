@@ -90,20 +90,6 @@ public class WormAuditSettings
 
 
    /*******************************************************************************
-    ** Seed the singleton only when absent; never overwrite an administrator edit.
-    *******************************************************************************/
-   public static void seed(WormAuditQBitConfig config) throws com.kingsrook.qqq.backend.core.exceptions.QException
-   {
-      var store = new AuditStore(null);
-      if(store.get(WormAuditTables.SETTINGS, 1) == null)
-      {
-         store.insert(WormAuditTables.SETTINGS, java.util.List.of(defaults(config)));
-      }
-      config.invalidateSettings();
-   }
-
-
-   /*******************************************************************************
     ** Read at most once per 30 seconds, isolated by QInstance identity.
     *******************************************************************************/
    public synchronized Values read()

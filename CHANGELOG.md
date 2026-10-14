@@ -6,6 +6,12 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 
 ### Added
 
+- Guided empty states: `help/qbit-worm-audit.yaml` (QQQ help-bundle format) gives the app and all six tables a summary and a "How rows get created" section, applied by the `WormAuditHelp` stand-in (`STAND-IN(core=QRun-IO/qqq#1198)`) without replacing host help. `WormAuditTablesGuardrailTest` pins runtime use, seeding or a documented reason, and help for every table; `WormAuditSettingsSeedTest` runs the script's settings seed on H2.
+
+### Removed
+
+- `WormAuditSettings.seed(config)`: dead code (nothing in `src/main` called it). The database script is the single seed, and `read()` already falls back to the configured values when the row is absent. Hosts do not call it.
+
 - RC.2 settings: editable, FIELD-audited singleton with insert-only defaults, validation, separate edit permission and a 30-second effective-settings cache. Schedules load at startup.
 - GOVERNANCE exports with 30-day default retention; per-export retention verification, administrator-bypass diagnostics, home warnings and documented COMPLIANCE transition.
 - New `worm-audit:10` settings migration; historical changesets remain unchanged.

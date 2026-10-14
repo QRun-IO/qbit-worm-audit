@@ -26,6 +26,7 @@ import com.kingsrook.qbits.wormaudit.app.WormAuditApp;
 import com.kingsrook.qbits.wormaudit.ddl.WormAuditDdl;
 import com.kingsrook.qbits.wormaudit.guard.AppendOnlyGuard;
 import com.kingsrook.qbits.wormaudit.model.LinkRangeWidget;
+import com.kingsrook.qbits.wormaudit.model.WormAuditHelp;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
 import com.kingsrook.qbits.wormaudit.processes.ExportProcesses;
 import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
@@ -230,6 +231,7 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
             .withDefaultMonitor(AlertDefaultMonitor.heartbeat(name, name, 24 * 3600, 2 * 3600)));
       }
       output.addSelfToInstance(qInstance);
+      WormAuditHelp.apply(qInstance, qBitConfig);
       denyAssistant(qInstance);
       return (new MetaDataProducerMultiOutput());
    }

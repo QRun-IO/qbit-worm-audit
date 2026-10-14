@@ -80,6 +80,12 @@ check and database constraint require ID 1. Every edit uses core FIELD-level aud
 the change enters the audit chain. `modify_date` and `modified_by` are stamped by the server.
 Keep notes free of sensitive data; notes are audited too.
 
+### Starter defaults and empty screens
+
+The only seeded table is `worm_audit_settings`, by the database script (`WormAuditDdl.postgres(config)`, changeset `worm-audit:10`): `INSERT ... SELECT ... WHERE NOT EXISTS`, so it adds row 1 from the host's configured values only when absent and never overwrites an edit. There is no separate defaults changelog and no extra include line. If the row is absent the qbit runs on the configured values (`WormAuditSettings.read()` falls back), so nothing stops, but run the script to make the values visible and editable. The chain, checkpoint, export, verification and purge tables are logs written by the qbit's jobs and the database owner's purge function, and start empty.
+
+Every table, and the app, ships help (`help/qbit-worm-audit.yaml`, the QQQ help-bundle format) saying what it is for and how its rows get created; the Next UI shows it as the empty state. A host's own help is never replaced. `WormAuditTablesGuardrailTest` and `WormAuditSettingsSeedTest` pin this.
+
 | Field | Default | Validation / effect |
 |---|---|---|
 | `audit_retention_years` | 6 | 1–100; home next eligible purge date |

@@ -119,7 +119,7 @@ class WormAuditSettingsTest
       var reader = new WormAuditSettings(config, clock);
       assertThat(reader.read().audit_retention_years()).isEqualTo(8);
       assertThat(reader.read().export_retention_days()).isEqualTo(45);
-      WormAuditSettings.seed(config);
+      WormAuditTestSupport.seedSettings(config);
       editor();
       update("export_retention_days", 90);
       assertThat(reader.read().export_retention_days()).isEqualTo(90);
@@ -128,7 +128,7 @@ class WormAuditSettingsTest
       assertThat(reader.read().export_retention_days()).isEqualTo(90);
       clock.now = clock.now.plusSeconds(1);
       assertThat(reader.read().export_retention_days()).isEqualTo(120);
-      WormAuditSettings.seed(config);
+      WormAuditTestSupport.seedSettings(config);
       assertThat(STORE.get(TABLE, 1).getValueInteger("export_retention_days")).isEqualTo(120);
       assertThat(reader.read().checkpoint_every_links()).isEqualTo(12);
       instance.getTables().remove(TABLE);
@@ -181,7 +181,7 @@ class WormAuditSettingsTest
       assertThat(table.isCapabilityEnabled(instance.getBackendForTable(TABLE), Capability.TABLE_UPDATE)).isTrue();
       assertThat(table.isCapabilityEnabled(instance.getBackendForTable(TABLE), Capability.TABLE_INSERT)).isFalse();
       assertThat(table.isCapabilityEnabled(instance.getBackendForTable(TABLE), Capability.TABLE_DELETE)).isFalse();
-      WormAuditSettings.seed(config);
+      WormAuditTestSupport.seedSettings(config);
       editor();
       assertThatThrownBy(() -> new DeleteAction().execute(new DeleteInput(TABLE).withPrimaryKeys(List.of(1)))).isInstanceOf(Exception.class);
       assertThatThrownBy(() -> new InsertAction().execute(new InsertInput(TABLE).withRecord(new QRecord().withValue("id", 2)))).isInstanceOf(Exception.class);
@@ -218,7 +218,7 @@ class WormAuditSettingsTest
    {
       var config = ChainVerificationTest.signed().withSettleHorizonSeconds(0);
       init(config);
-      WormAuditSettings.seed(config);
+      WormAuditTestSupport.seedSettings(config);
       QContext.getQInstance().withEnforcePermissionsInCoreActions(true);
       QContext.getQSession().withPermissions(Set.of(TABLE + ".read", TABLE + ".edit"));
       assertThatThrownBy(() -> update("export_lock_mode", "COMPLIANCE")).hasMessageContaining("worm_audit.settings");
@@ -243,7 +243,7 @@ class WormAuditSettingsTest
    {
       var config = ChainVerificationTest.signed();
       var instance = init(config);
-      WormAuditSettings.seed(config);
+      WormAuditTestSupport.seedSettings(config);
       editor();
       update("chain_interval_seconds", 45);
       update("export_cron", "0 15 4 * * ?");
@@ -275,7 +275,7 @@ class WormAuditSettingsTest
    {
       var config = ChainVerificationTest.signed().withCheckpointEveryLinks(2).withSettleHorizonSeconds(0);
       init(config);
-      WormAuditSettings.seed(config);
+      WormAuditTestSupport.seedSettings(config);
       var storage = new SealedExportTest.MemorySealedStore();
       audit(1);
       audit(2);
