@@ -368,7 +368,8 @@ registers as a `MiddlewareSpecExtension` under `/qqq/v1/qbit/worm-audit/...`
   `mc mb --with-lock --ignore-existing` and `mc retention set --default COMPLIANCE 6y`. Object
   Lock can only be enabled at bucket creation.
 - **Policy:** `kof22-app` gets `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`,
-  `s3:GetObjectRetention`, `s3:GetBucketObjectLockConfiguration` on that bucket. No delete, and no
+  `s3:GetObjectRetention`, `s3:PutObjectRetention` (needed to set the lock on each put),
+  `s3:GetBucketObjectLockConfiguration` on that bucket. No delete, and no
   `s3:BypassGovernanceRetention` (irrelevant under COMPLIANCE anyway).
 - **Off-site:** COMPLIANCE on a single homelab MinIO stops every API deletion, but not someone
   destroying the volume. Recommend extending `media-offsite-copy` to replicate the bucket to a B2
