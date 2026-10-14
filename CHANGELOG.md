@@ -6,6 +6,10 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 
 ### Added
 
+- RC.2 settings: editable, FIELD-audited singleton with insert-only defaults, validation, separate edit permission and a 30-second effective-settings cache. Schedules load at startup.
+- GOVERNANCE exports with 30-day default retention; per-export retention verification, administrator-bypass diagnostics, home warnings and documented COMPLIANCE transition.
+- New `worm-audit:10` settings migration; historical changesets remain unchanged.
+
 - Phase (c): configurable WORM Audit app home, full-width summary widget and optional host health card; permission-aware navigation and content-free, responsive light/dark summaries.
 - Chain backlog/settling counts, verification and export record links, sealed-range gaps/lag, retention eligibility and recent purge/refusal history.
 - PostgreSQL guard/ownership/purge-function diagnostics, signing/trust warnings, tri-state Object Lock capability and stale daily-verification warnings.

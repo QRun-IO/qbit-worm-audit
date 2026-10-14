@@ -243,7 +243,9 @@ public class SealedExporter
       {
          throw (new ExportFailure("Export refused: bucket does not support Object Lock"));
       }
-      Instant until = now.atZone(ZoneOffset.UTC).plusYears(config.getRetentionYears()).toInstant();
+      var settings = config.effectiveSettings();
+      var mode = com.kingsrook.qbits.objectstorage.api.LockMode.valueOf(settings.export_lock_mode());
+      Instant until = now.plus(settings.export_retention_days(), ChronoUnit.DAYS);
       String prefix = config.getExportPrefix() + "/" + DateTimeFormatter.ofPattern("yyyy/MM/dd").withZone(ZoneOffset.UTC).format(now)
          + "/" + scope.from() + "-" + scope.to() + "/";
       QRecord row;
@@ -270,7 +272,7 @@ public class SealedExporter
             .withValue("bucket_alias", config.getExportBucketAlias()).withValue("object_prefix", prefix)
             .withValue("manifest_key", prefix + "manifest.json").withValue("manifest_sha256", ExportFiles.sha256(files.file("manifest.json")))
             .withValue("prev_manifest_sha256", previous).withValue("object_count", 3L)
-            .withValue("lock_mode", "COMPLIANCE").withValue("retain_until", until).withValue("sealed_at", now);
+            .withValue("lock_mode", mode.name()).withValue("retain_until", until).withValue("sealed_at", now);
          if(!new SealedExportVerifier(config, storage).inspect(files, row, store).result().passed())
          {
             throw (new ExportFailure("Export refused: source does not match the signed chain"));
@@ -279,15 +281,15 @@ public class SealedExporter
          Map<String, String> versions = new LinkedHashMap<>();
          for(String name : ExportFiles.NAMES)
          {
-            String version = storage.put(prefix + name, files.file(name), until);
+            String version = storage.put(prefix + name, files.file(name), mode, until);
             if(!ExportFiles.validVersion(version))
             {
                throw (new ExportFailure("Export refused: object " + name + " returned no version id"));
             }
             var headObject = storage.head(prefix + name);
-            if(!ExportFiles.locked(headObject, until))
+            if(!ExportFiles.locked(headObject, mode.name(), until))
             {
-               throw (new ExportFailure("Export refused: object " + name + " did not echo COMPLIANCE retention"));
+               throw (new ExportFailure("Export refused: object " + name + " did not echo " + mode.name() + " retention"));
             }
             if(!version.equals(headObject.getVersionId()))
             {

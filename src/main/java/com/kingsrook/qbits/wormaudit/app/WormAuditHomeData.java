@@ -54,7 +54,7 @@ import com.kingsrook.qqq.backend.module.rdbms.actions.RDBMSTransaction;
 public record WormAuditHomeData(long links, Instant lastLinkAt, long backlog, long settling, int settleSeconds,
    QRecord lastVerification, QRecord openBreak, QRecord lastExport, long exportLag, Long exportAgeHours,
    List<String> exportGaps, String bucketAlias, String lockCapability, String lockReason,
-   int retentionYears, QRecord anchor, Instant oldestAudit, Instant nextPurge,
+   String exportLockMode, int exportRetentionDays, int retentionYears, QRecord anchor, Instant oldestAudit, Instant nextPurge,
    List<QRecord> recentPurges, List<String> warnings)
 {
    /*******************************************************************************
@@ -71,7 +71,16 @@ public record WormAuditHomeData(long links, Instant lastLinkAt, long backlog, lo
     *******************************************************************************/
    public static WormAuditHomeData load(WormAuditQBitConfig config, SealedStore storage, Instant now) throws QException
    {
+      var settings = config.effectiveSettings();
       List<String> warnings = new ArrayList<>();
+      if("GOVERNANCE".equals(settings.export_lock_mode()))
+      {
+         warnings.add("Sealed exports use GOVERNANCE mode: an administrator with s3:BypassGovernanceRetention can delete them. Switch to COMPLIANCE for write-once copies.");
+      }
+      if(now.plus(Duration.ofDays(settings.export_retention_days())).isBefore(now.atZone(ZoneOffset.UTC).plusYears(settings.audit_retention_years()).toInstant()))
+      {
+         warnings.add("Export retention is shorter than audit retention.");
+      }
       String capability = "UNKNOWN";
       String reason = "Object Lock capability could not be confirmed";
       try
@@ -113,7 +122,7 @@ public record WormAuditHomeData(long links, Instant lastLinkAt, long backlog, lo
             AuditStore store = new AuditStore(transaction);
             QRecord lastLink = store.last(WormAuditTables.CHAIN);
             long links = store.count(WormAuditTables.CHAIN, new QQueryFilter());
-            Instant cutoff = now.minusSeconds(config.getSettleHorizonSeconds());
+            Instant cutoff = now.minusSeconds(settings.settle_horizon_seconds());
             long backlog = store.unchainedCount(cutoff, true);
             long settling = store.unchainedCount(cutoff, false);
             QRecord verification = latest(store, WormAuditTables.VERIFICATION, new QQueryFilter(), "finished_at");
@@ -147,10 +156,10 @@ public record WormAuditHomeData(long links, Instant lastLinkAt, long backlog, lo
             warnings.addAll(PostgresSetupWarnings.load(transaction, config));
             transaction.commit();
             return (new WormAuditHomeData(links, lastLink == null ? null : lastLink.getValueInstant("chained_at"), backlog, settling,
-               config.getSettleHorizonSeconds(), verification, openBreak, export, lag,
+               settings.settle_horizon_seconds(), verification, openBreak, export, lag,
                export == null || export.getValueInstant("sealed_at") == null ? null : Math.max(0, Duration.between(export.getValueInstant("sealed_at"), now).toHours()),
-               List.copyOf(gaps), config.getExportBucketAlias(), capability, reason, config.getRetentionYears(), anchorId == 0 ? null : anchor,
-               oldestAt, oldestAt == null ? null : oldestAt.atZone(ZoneOffset.UTC).plusYears(config.getRetentionYears()).toInstant(), List.copyOf(purges), List.copyOf(warnings)));
+               List.copyOf(gaps), config.getExportBucketAlias(), capability, reason, settings.export_lock_mode(), settings.export_retention_days(), settings.audit_retention_years(), anchorId == 0 ? null : anchor,
+               oldestAt, oldestAt == null ? null : oldestAt.atZone(ZoneOffset.UTC).plusYears(settings.audit_retention_years()).toInstant(), List.copyOf(purges), List.copyOf(warnings)));
          }
          catch(Exception e)
          {

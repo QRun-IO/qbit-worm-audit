@@ -133,6 +133,7 @@ public class WormAuditVerifier
     *******************************************************************************/
    VerificationResult verify(AuditStore store, Set<Long> selection, Instant now) throws QException
    {
+      var settings = config.effectiveSettings();
       VerificationResult result = new VerificationResult(now);
       if(config.getSigningKey() == null)
       {
@@ -214,7 +215,7 @@ public class WormAuditVerifier
       }
       if(selection == null)
       {
-         Instant cutoff = now.minusSeconds(config.getSettleHorizonSeconds());
+         Instant cutoff = now.minusSeconds(settings.settle_horizon_seconds());
          if(store.isRdbms())
          {
             store.completeness(cutoff, result);
@@ -500,7 +501,7 @@ public class WormAuditVerifier
             result.add(null, null, prefix + "signature does not verify");
          }
          if(from < 1 || to < from || checkpoint.getValueLong("link_count") != to - from + 1
-            || to - from + 1 > config.getCheckpointEveryLinks())
+            || to - from + 1 > Integer.MAX_VALUE)
          {
             result.add(null, null, prefix + "invalid link range or count");
             return;

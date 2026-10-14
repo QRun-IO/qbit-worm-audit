@@ -113,7 +113,6 @@ class PostgresAcceptanceTest
    void database() throws Exception
    {
       config = ChainVerificationTest.signed().withSettleHorizonSeconds(0);
-      instance = RdbmsTestSupport.instance(POSTGRES.getJdbcUrl(), "app", "fixture", config, true);
       try(var c = owner())
       {
          sql(
@@ -124,6 +123,7 @@ class PostgresAcceptanceTest
                c,
                "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='app') THEN"
                   + " CREATE ROLE app LOGIN PASSWORD 'fixture'; END IF; END $$");
+         instance = RdbmsTestSupport.instance(POSTGRES.getJdbcUrl(), "app", "fixture", config, true);
          RdbmsTestSupport.createTables(c, instance, true);
          String ddl = WormAuditDdl.postgres(config);
          sql(c, ddl);
@@ -142,9 +142,17 @@ class PostgresAcceptanceTest
    {
       var storage = new com.kingsrook.qbits.wormaudit.demo.MemorySealedStore();
       var clean = com.kingsrook.qbits.wormaudit.app.WormAuditHomeData.load(config, storage, java.time.Instant.now());
-      assertThat(clean.warnings()).containsExactly("Daily verification has never run");
+      assertThat(clean.warnings()).contains("Daily verification has never run").noneMatch(w -> w.contains("guard") && w.contains("settings"));
       try(var connection = owner())
       {
+         sql(connection, "UPDATE worm_audit_settings SET audit_retention_years=7 WHERE id=1");
+         config.invalidateSettings();
+         assertThat(com.kingsrook.qbits.wormaudit.app.WormAuditHomeData.load(config, storage, java.time.Instant.now()).warnings())
+            .anyMatch(w -> w.contains("purge function's compiled interval (6 years)"));
+         sql(connection, WormAuditDdl.postgres(config));
+         assertThat(count(connection, "SELECT audit_retention_years FROM worm_audit_settings WHERE id=1")).isEqualTo(7);
+         sql(connection, "UPDATE worm_audit_settings SET audit_retention_years=6 WHERE id=1");
+         config.invalidateSettings();
          sql(connection, "DROP TRIGGER worm_audit_row_guard ON audit_detail");
          sql(connection, "ALTER TABLE worm_audit_chain DISABLE TRIGGER worm_audit_truncate_guard");
          sql(connection, "DROP FUNCTION public.worm_audit_purge(timestamptz)");
@@ -338,7 +346,7 @@ class PostgresAcceptanceTest
    void prefixCannotSplitAnAuditAndAdvisoryLockSkipsTick() throws Exception
    {
       // This retention fixture deliberately polls a detail for a six-year-old header.
-      config.withLateDetailLookbackHours(24 * 365 * 10);
+      setting("late_detail_lookback_hours", 24 * 365 * 10);
       audit(1);
       new WormAuditChainer(config).chainOnce();
       try(var c = owner())
@@ -512,7 +520,7 @@ class PostgresAcceptanceTest
    void chainerUsesUtcCutoffInChicago() throws Exception
    {
       var original = java.util.TimeZone.getDefault();
-      config.withSettleHorizonSeconds(60);
+      setting("settle_horizon_seconds", 60);
       try(var connection = owner())
       {
          sql(connection, "ALTER TABLE audit ALTER COLUMN timestamp TYPE timestamp without time zone USING timestamp AT TIME ZONE 'UTC'");
@@ -543,7 +551,7 @@ class PostgresAcceptanceTest
    @Test
    void postgresLateDetailWindowAndCompleteness() throws Exception
    {
-      config.withSettleHorizonSeconds(60);
+      setting("settle_horizon_seconds", 60);
       var now = java.time.Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
       var cutoff = now.minusSeconds(60);
       try(var connection = owner(); var statement = connection.prepareStatement(
@@ -574,4 +582,16 @@ class PostgresAcceptanceTest
       assertThat(new WormAuditVerifier(config).verify().getBreaks()).anyMatch(b -> b.reason().contains("audit_detail 1 is not covered"));
    }
 
+
+   /*******************************************************************************
+    ** The settings row (seeded by the DDL) overrides config: change it there.
+    *******************************************************************************/
+   private void setting(String column, int value) throws Exception
+   {
+      try(var connection = owner())
+      {
+         sql(connection, "UPDATE worm_audit_settings SET " + column + "=" + value + " WHERE id=1");
+      }
+      config.invalidateSettings();
+   }
 }

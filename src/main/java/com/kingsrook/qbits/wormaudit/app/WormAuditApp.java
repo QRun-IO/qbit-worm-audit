@@ -88,7 +88,8 @@ public final class WormAuditApp
       for(String name : WormAuditTables.NAV)
       {
          QTableMetaData table = tables.stream().filter(t -> t.getName().equals(name)).findFirst().orElseThrow();
-         app.withSectionOfChildren(new QAppSection().withName(name).withLabel(table.getLabel()), table);
+         app.withSectionOfChildren(new QAppSection().withName(name).withLabel(WormAuditTables.navigationLabel(name)),
+            WormAuditTables.SETTINGS.equals(name) ? table.clone().withLabel("Settings") : table);
       }
       return (app);
    }

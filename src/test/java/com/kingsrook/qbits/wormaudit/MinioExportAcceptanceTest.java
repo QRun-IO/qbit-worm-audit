@@ -78,7 +78,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class MinioExportAcceptanceTest
 {
    /*******************************************************************************
-    ** Production adapter, COMPLIANCE retention, version preservation and UI findings.
+    ** Production adapter, GOVERNANCE and COMPLIANCE retention, version preservation and UI findings.
     *******************************************************************************/
    @Test
    void lockedRoundTripVersionRetentionLiveTamperAndUnsupportedBucket() throws Exception
@@ -130,17 +130,17 @@ class MinioExportAcceptanceTest
             {
                String key = row.getValueString("object_prefix") + name;
                var head = storage.head(key);
-               assertThat(head.getLockMode()).isEqualTo("COMPLIANCE");
-               assertThat(Duration.between(now.atZone(java.time.ZoneOffset.UTC).plusYears(6).toInstant(), head.getLockRetainUntil()).abs()).isLessThan(Duration.ofSeconds(2));
+               assertThat(head.getLockMode()).isEqualTo("GOVERNANCE");
+               assertThat(Duration.between(now.plus(Duration.ofDays(30)), head.getLockRetainUntil()).abs()).isLessThan(Duration.ofSeconds(2));
                String originalVersion = head.getVersionId();
                assertThat(originalVersion).isNotBlank();
                assertThat(ExportFiles.parse(row.getValueString("object_versions").getBytes(java.nio.charset.StandardCharsets.UTF_8)))
                   .containsEntry(name, originalVersion);
-               assertThatThrownBy(() -> s3.deleteObject(b -> b.bucket("worm-locked").key(key).versionId(originalVersion)))
+               assertThatThrownBy(() -> s3.deleteObject(b -> b.bucket("worm-locked").key(key).versionId(originalVersion).bypassGovernanceRetention(false)))
                   .isInstanceOf(S3Exception.class);
                byte[] original = s3.getObjectAsBytes(b -> b.bucket("worm-locked").key(key).versionId(originalVersion)).asByteArray();
                // S3 overwrites create new versions; they cannot replace the locked version.
-               var replacement = s3.putObject(b -> b.bucket("worm-locked").key(key).objectLockMode("COMPLIANCE")
+               var replacement = s3.putObject(b -> b.bucket("worm-locked").key(key).objectLockMode("GOVERNANCE")
                   .objectLockRetainUntilDate(row.getValueInstant("retain_until")), RequestBody.fromString("different replacement bytes"));
                assertThat(replacement.versionId()).isNotEqualTo(originalVersion);
                assertThat(s3.getObjectAsBytes(b -> b.bucket("worm-locked").key(key).versionId(originalVersion)).asByteArray()).isEqualTo(original);
@@ -163,11 +163,26 @@ class MinioExportAcceptanceTest
             tamper("auditDetail", 1, "newValue", "new");
             audit(2);
             new WormAuditChainer(config).chainOnce();
+            config.withExportLockMode("COMPLIANCE");
+            var compliance = new SealedExporter(config).run("USER", Instant.now());
+            assertThat(compliance.failed()).isFalse();
+            assertThat(compliance.row().getValueString("lock_mode")).isEqualTo("COMPLIANCE");
+            assertThat(verifier.verify(compliance.row(), "USER").result().passed()).isTrue();
+            for(String name : ExportFiles.NAMES)
+            {
+               String key = compliance.row().getValueString("object_prefix") + name;
+               var head = storage.head(key);
+               assertThat(head.getLockMode()).isEqualTo("COMPLIANCE");
+               assertThatThrownBy(() -> s3.deleteObject(b -> b.bucket("worm-locked").key(key).versionId(head.getVersionId())))
+                  .isInstanceOf(S3Exception.class);
+            }
+            audit(3);
+            new WormAuditChainer(config).chainOnce();
             config.withExportBucketAlias("plain");
             var failed = new SealedExporter(config).run("SCHEDULE", Instant.now());
             assertThat(failed.failed()).isTrue();
             assertThat(failed.message()).contains("does not support Object Lock");
-            assertThat(STORE.all(WormAuditTables.EXPORT)).hasSize(1);
+            assertThat(STORE.all(WormAuditTables.EXPORT)).hasSize(2);
             assertThat(ProcessesAndAlertsTest.Sink.raised).hasSize(1);
          }
          finally

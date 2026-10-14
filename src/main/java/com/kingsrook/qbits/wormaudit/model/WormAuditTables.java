@@ -24,16 +24,21 @@ package com.kingsrook.qbits.wormaudit.model;
 import java.util.ArrayList;
 import java.util.List;
 import com.kingsrook.qbits.wormaudit.WormAuditQBitConfig;
+import com.kingsrook.qbits.wormaudit.WormAuditSettings;
+import com.kingsrook.qqq.backend.core.actions.customizers.TableCustomizers;
 import com.kingsrook.qqq.backend.core.model.metadata.audits.AuditLevel;
 import com.kingsrook.qqq.backend.core.model.metadata.audits.QAuditRules;
+import com.kingsrook.qqq.backend.core.model.metadata.code.QCodeReference;
 import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldType;
+import com.kingsrook.qqq.backend.core.model.metadata.help.QHelpContent;
 import com.kingsrook.qqq.backend.core.model.metadata.layout.QIcon;
 import com.kingsrook.qqq.backend.core.model.metadata.permissions.PermissionLevel;
 import com.kingsrook.qqq.backend.core.model.metadata.permissions.QPermissionRules;
 import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValue;
 import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValueSource;
 import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValueSourceType;
+import com.kingsrook.qqq.backend.core.model.metadata.tables.Capability;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QFieldSection;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.Tier;
@@ -51,8 +56,9 @@ public final class WormAuditTables
    public static final String EXPORT = "worm_audit_export";
    public static final String VERIFICATION = "worm_audit_verification";
    public static final String PURGE = "worm_audit_purge";
-   public static final List<String> ALL = List.of(CHAIN, CHECKPOINT, EXPORT, VERIFICATION, PURGE);
-   public static final List<String> NAV = List.of(VERIFICATION, EXPORT, CHECKPOINT, CHAIN, PURGE);
+   public static final String SETTINGS = "worm_audit_settings";
+   public static final List<String> ALL = List.of(CHAIN, CHECKPOINT, EXPORT, VERIFICATION, PURGE, SETTINGS);
+   public static final List<String> NAV = List.of(VERIFICATION, EXPORT, CHECKPOINT, CHAIN, PURGE, SETTINGS);
 
    /*******************************************************************************
     ** Utility class.
@@ -73,7 +79,69 @@ public final class WormAuditTables
       tables.add(table(config, EXPORT, "Sealed Export", "id:L from_link_id:L to_link_id:L from_checkpoint_id:L to_checkpoint_id:L bucket_alias:S object_prefix:T object_versions:T manifest_key:T manifest_sha256:S prev_manifest_sha256:S object_count:L byte_count:L lock_mode:S retain_until:D sealed_at:D"));
       tables.add(table(config, VERIFICATION, "Verification", "id:L kind:S trigger:S started_at:D finished_at:D from_link_id:L to_link_id:L links_checked:L outcome:S break_count:L first_break_link_id:L first_break_audit_id:L first_break_reason:T export_id:L run_by:S"));
       tables.add(table(config, PURGE, "Purge", "id:L requested_at:D requested_by:S cutoff:D retention_interval:S outcome:S reason:T audits_deleted:L details_deleted:L links_deleted:L anchor_link_id:L anchor_hash:S"));
+      tables.add(settings(config));
       return (tables);
+   }
+
+
+   /*******************************************************************************
+    ** Editable, FIELD-audited singleton with standard QQQ record sections.
+    *******************************************************************************/
+   public static QTableMetaData settings(WormAuditQBitConfig config)
+   {
+      QTableMetaData table = new QTableMetaData().withName(SETTINGS).withLabel("WORM Audit Settings")
+         .withBackendName(config.getBackendName()).withBackendDetails(new RDBMSTableBackendDetails().withTableName(SETTINGS))
+         .withPrimaryKeyField("id").withRecordLabelFields("id").withRecordLabelFormat("WORM Audit Settings")
+         .withAuditRules(new QAuditRules().withAuditLevel(AuditLevel.FIELD))
+         .withPermissionRules(new QPermissionRules().withLevel(PermissionLevel.READ_INSERT_EDIT_DELETE_PERMISSIONS)
+            .withPermissionBaseName(SETTINGS).withCustomPermissionChecker(new QCodeReference(SettingsPermissions.class)))
+         .withoutCapabilities(Capability.TABLE_INSERT, Capability.TABLE_DELETE)
+         .withCustomizer(TableCustomizers.PRE_INSERT_RECORD, new QCodeReference(SettingsCustomizer.class))
+         .withCustomizer(TableCustomizers.PRE_UPDATE_RECORD, new QCodeReference(SettingsCustomizer.class))
+         .withCustomizer(TableCustomizers.POST_UPDATE_RECORD, new QCodeReference(SettingsCustomizer.class))
+         .withCustomizer(TableCustomizers.PRE_DELETE_RECORD, new QCodeReference(SettingsCustomizer.class))
+         .withField(new QFieldMetaData("id", QFieldType.INTEGER).withLabel("ID").withBackendName("id").withIsEditable(false).withDefaultValue(1));
+      var defaults = WormAuditSettings.defaults(config);
+      table.withField(new QFieldMetaData("audit_retention_years", QFieldType.INTEGER).withBackendName("audit_retention_years").withLabel("Audit retention years")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("audit_retention_years")));
+      table.withField(new QFieldMetaData("export_lock_mode", QFieldType.STRING).withBackendName("export_lock_mode").withLabel("Export lock mode")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("export_lock_mode")));
+      table.withField(new QFieldMetaData("export_retention_days", QFieldType.INTEGER).withBackendName("export_retention_days").withLabel("Export retention days")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("export_retention_days")));
+      table.withField(new QFieldMetaData("checkpoint_every_links", QFieldType.INTEGER).withBackendName("checkpoint_every_links").withLabel("Checkpoint every links")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("checkpoint_every_links")));
+      table.withField(new QFieldMetaData("checkpoint_every_minutes", QFieldType.INTEGER).withBackendName("checkpoint_every_minutes").withLabel("Checkpoint every minutes")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("checkpoint_every_minutes")));
+      table.withField(new QFieldMetaData("chain_interval_seconds", QFieldType.INTEGER).withBackendName("chain_interval_seconds").withLabel("Chain interval seconds")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("chain_interval_seconds")));
+      table.withField(new QFieldMetaData("settle_horizon_seconds", QFieldType.INTEGER).withBackendName("settle_horizon_seconds").withLabel("Settle horizon seconds")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("settle_horizon_seconds")));
+      table.withField(new QFieldMetaData("late_detail_lookback_hours", QFieldType.INTEGER).withBackendName("late_detail_lookback_hours").withLabel("Late detail lookback hours")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("late_detail_lookback_hours")));
+      table.withField(new QFieldMetaData("export_cron", QFieldType.STRING).withBackendName("export_cron").withLabel("Export schedule (UTC)")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("export_cron")));
+      table.withField(new QFieldMetaData("verify_cron", QFieldType.STRING).withBackendName("verify_cron").withLabel("Verify schedule (UTC)")
+         .withIsRequired(true).withDefaultValue(defaults.getValue("verify_cron")));
+      table.getField("export_lock_mode").withInlinePossibleValueSource(new QPossibleValueSource().withName(SETTINGS + "_lock_mode")
+         .withType(QPossibleValueSourceType.ENUM).withIdType(QFieldType.STRING).withEnumValues(List.of(
+            new QPossibleValue<>("GOVERNANCE", "GOVERNANCE"), new QPossibleValue<>("COMPLIANCE", "COMPLIANCE"))));
+      for(String field : List.of("export_cron", "verify_cron", "chain_interval_seconds"))
+      {
+         table.getField(field).withHelpContent(new QHelpContent("Takes effect after restart. Cron schedules use UTC and Quartz syntax."));
+      }
+      table.getField("audit_retention_years").withHelpContent(new QHelpContent("Used for the next eligible purge date. The database purge interval changes only through a reviewed migration."));
+      table.withField(new QFieldMetaData("notes", QFieldType.TEXT).withLabel("Notes").withBackendName("notes"));
+      table.withField(new QFieldMetaData("modify_date", QFieldType.DATE_TIME).withLabel("Modified").withBackendName("modify_date").withIsEditable(false));
+      table.withField(new QFieldMetaData("modified_by", QFieldType.STRING).withLabel("Modified by").withBackendName("modified_by").withIsEditable(false));
+      table.withSection(new QFieldSection("retention", "Retention", new QIcon("lock"), Tier.T1,
+         List.of("id", "audit_retention_years", "export_lock_mode", "export_retention_days")).withGridColumns(12));
+      table.withSection(new QFieldSection("cadence", "Chain and checkpoints", new QIcon("link"), Tier.T2,
+         List.of("checkpoint_every_links", "checkpoint_every_minutes", "settle_horizon_seconds", "late_detail_lookback_hours")).withGridColumns(12));
+      table.withSection(new QFieldSection("schedules", "Schedules (after restart)", new QIcon("schedule"), Tier.T2,
+         List.of("chain_interval_seconds", "export_cron", "verify_cron")).withGridColumns(12));
+      table.withSection(new QFieldSection("changes", "Changes", new QIcon("edit_note"), Tier.T2,
+         List.of("notes", "modify_date", "modified_by")).withGridColumns(12));
+      return (table);
    }
 
 
@@ -169,6 +237,7 @@ public final class WormAuditTables
    {
       return (switch(name)
       {
+         case SETTINGS -> "Settings";
          case CHAIN -> "Audit Chain";
          case CHECKPOINT -> "Checkpoints";
          case EXPORT -> "Sealed Exports";

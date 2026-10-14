@@ -50,9 +50,9 @@ public interface SealedStore
    }
 
    /*******************************************************************************
-    ** Upload a file with COMPLIANCE retention.
+    ** Upload a file with the selected Object Lock mode and retention.
     *******************************************************************************/
-   String put(String key, Path file, Instant retainUntil) throws Exception;
+   String put(String key, Path file, com.kingsrook.qbits.objectstorage.api.LockMode mode, Instant retainUntil) throws Exception;
 
    /*******************************************************************************
     ** Read current object metadata, or null for an absent object.

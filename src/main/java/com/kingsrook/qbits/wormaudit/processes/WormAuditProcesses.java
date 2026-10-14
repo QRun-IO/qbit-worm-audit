@@ -89,6 +89,7 @@ public final class WormAuditProcesses
     *******************************************************************************/
    public static List<QProcessMetaData> processes(WormAuditQBitConfig config)
    {
+      var settings = config.effectiveSettings();
       Map<String, Serializable> values = new HashMap<>();
       values.put(StreamedETLWithFrontendProcess.FIELD_SOURCE_TABLE, WormAuditTables.CHAIN);
       values.put(StreamedETLWithFrontendProcess.FIELD_DESTINATION_TABLE, WormAuditTables.CHAIN);
@@ -100,11 +101,11 @@ public final class WormAuditProcesses
       QProcessMetaData chain = new QProcessMetaData().withName(CHAIN).withLabel("Chain settled audit records")
          .withStep(new QBackendStepMetaData().withName("chain").withCode(new QCodeReference(ChainTick.class)))
          .withPermissionRules(permission()).withSchedule(new QScheduleMetaData().withSchedulerName(config.getSchedulerName())
-            .withRepeatSeconds(config.getChainIntervalSeconds()).withInitialDelaySeconds(config.getChainIntervalSeconds()));
+            .withRepeatSeconds(settings.chain_interval_seconds()).withInitialDelaySeconds(settings.chain_interval_seconds()));
       QProcessMetaData daily = new QProcessMetaData().withName(DAILY).withLabel("Daily audit chain verification")
          .withStep(new QBackendStepMetaData().withName("verify").withCode(new QCodeReference(Daily.class)))
          .withPermissionRules(permission()).withSchedule(new QScheduleMetaData().withSchedulerName(config.getSchedulerName())
-            .withCronExpression(config.getVerifyCron()).withCronTimeZoneId("UTC"));
+            .withCronExpression(settings.verify_cron()).withCronTimeZoneId("UTC"));
       return (List.of(verify, chain, daily));
    }
 

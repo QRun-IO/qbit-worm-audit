@@ -3,8 +3,8 @@
 Phases (a)–(c) provide PostgreSQL append-only enforcement, an asynchronous audit hash chain,
 Ed25519 checkpoints, live and sealed-export verification actions, and daily jobs with core QAlerts signals.
 It hashes exactly the audit values core stored; it does not read application records or
-secured-data keys. Sealed JSONL exports use qbit-object-storage 0.1.0-RC.2 and COMPLIANCE
-Object Lock. The WORM Audit app home summarizes chain health, exports, retention and setup.
+secured-data keys. Sealed JSONL exports use qbit-object-storage 0.1.0-RC.2 and configurable
+Object Lock (GOVERNANCE for 30 days by default). The WORM Audit app home summarizes chain health, exports, retention and setup.
 
 Requires Java 21, Maven wrapper 3.9.11 and QQQ 4.1.0-RC.5. PostgreSQL provides enforcement;
 memory/H2 support tamper-evidence tests without database enforcement.
@@ -12,8 +12,9 @@ memory/H2 support tamper-evidence tests without database enforcement.
 ## Tables and permissions
 
 All sidecar tables use the configured host backend, snake_case fields, BIGINT identifiers,
-record sections, and full table-name permissions. They do not audit themselves. The app lists
-Verifications, Sealed Exports, Checkpoints, Audit Chain, and Purges in that order.
+record sections, and full table-name permissions. Immutable sidecars do not audit themselves.
+The editable Settings singleton uses an INTEGER ID and FIELD-level core audit. The app lists
+Verifications, Sealed Exports, Checkpoints, Audit Chain, Purges, and Settings in that order.
 
 | Table | Purpose | Permission |
 |---|---|---|
@@ -22,18 +23,19 @@ Verifications, Sealed Exports, Checkpoints, Audit Chain, and Purges in that orde
 | `worm_audit_checkpoint` | Signed ranges and Merkle roots | `worm_audit_checkpoint.read` |
 | `worm_audit_chain` | Contiguous links and explicit detail coverage | `worm_audit_chain.read` |
 | `worm_audit_purge` | Refusals, removal counts and retention anchors | `worm_audit_purge.read` |
+| `worm_audit_settings` | Editable singleton; every edit is audited and chained | `worm_audit_settings.read`; editing needs `worm_audit_settings.edit` **and** `worm_audit.settings` |
 
 `worm_audit.verify` authorizes the standard streamed ETL **Verify audit chain** action.
 It also authorizes **Verify sealed export** on selected export records. `worm_audit.export`
 authorizes **Export now** on the export table. Processes are table/record actions or schedules;
 none is a navigation entry.
-Insert/update/delete capabilities are absent on sidecar tables; update/delete capabilities
+Insert/update/delete capabilities are absent on immutable sidecar tables; Settings allows updates only; update/delete capabilities
 are removed from all four core audit tables. Internal appends use an explicit permission bypass.
 Checkpoint, export and verification record screens have a bounded chain-link child list;
 range endpoints and export/checkpoint references link to their records.
 
 The table metadata customizer can configure host ESB publications. Quick Search registration
-is host-owned through `QuickSearchQBitConfig.searchableTables`; add all five tables.
+is host-owned through `QuickSearchQBitConfig.searchableTables`; add the desired tables.
 Verification and export inserts use QQQ's record-change listener SPI,
 so an installed ESB publisher receives those events when the host configures its destinations
 on these two tables. The qbit defines no destination and configures no chain-link publication.
@@ -70,6 +72,58 @@ to verification. It does not itself break the chain. Signing requires a matching
 Rotate by adding a new pin and changing the supplier; retain old pins for old checkpoints.
 Never store the private key in a database row or checked-in configuration.
 
+## Settings
+
+Open **WORM Audit → Settings**, record **1** (`worm_audit_settings`, labelled WORM Audit Settings).
+This is a standard editable QQQ table. New records and deletion are disabled; a pre-insert
+check and database constraint require ID 1. Every edit uses core FIELD-level auditing, so
+the change enters the audit chain. `modify_date` and `modified_by` are stamped by the server.
+Keep notes free of sensitive data; notes are audited too.
+
+| Field | Default | Validation / effect |
+|---|---|---|
+| `audit_retention_years` | 6 | 1–100; home next eligible purge date |
+| `export_lock_mode` | GOVERNANCE | GOVERNANCE or COMPLIANCE; new exports |
+| `export_retention_days` | 30 | 1–36500; new exports |
+| `checkpoint_every_links` | 10000 | Positive integer; new checkpoint ranges |
+| `checkpoint_every_minutes` | 60 | Positive integer; checkpoint cadence |
+| `chain_interval_seconds` | 30 | Positive integer; **takes effect after restart** |
+| `settle_horizon_seconds` | 60 | Nonnegative integer; chaining and verification |
+| `late_detail_lookback_hours` | 24 | Positive integer; late-detail polling |
+| `export_cron` | `0 0 2 * * ?` | Quartz cron, UTC; **takes effect after restart** |
+| `verify_cron` | `0 0 3 * * ?` | Quartz cron, UTC; **takes effect after restart** |
+| `notes` | Empty | Administrative notes |
+| `modify_date`, `modified_by` | Server supplied | Last edit time and user |
+
+Config values supply defaults for missing rows or null fields; a missing settings table also
+falls back to config. Other database failures fail closed. `exportLockMode` and
+`exportRetentionDays` are the corresponding config defaults. Runtime reads cache the row
+for at most 30 seconds per application instance; local QQQ edits invalidate that cache.
+Each run reads effective settings. Startup schedules read the existing row, or config when
+absent. Historical checkpoints remain valid after changing their creation cadence.
+
+Changeset `worm-audit:10` creates and seeds the table with `INSERT ... SELECT ... WHERE NOT
+EXISTS`; rerunning it never overwrites an administrator change. The renderer seeds from the
+host config. Memory hosts and the demo can call `WormAuditSettings.seed(config)` for the same
+insert-only behavior during single-threaded startup.
+
+`audit_retention_years` does **not** rewrite the database purge function. The home warns if
+it differs from the compiled interval; changing that interval requires a reviewed migration.
+The home also warns when export retention is shorter than audit retention and while
+GOVERNANCE permits administrator bypass deletion. The runtime role receives SELECT, INSERT
+and UPDATE on Settings, with no DELETE or TRUNCATE grant and no append-only triggers.
+
+## Switching sealed exports to COMPLIANCE
+
+Edit `export_lock_mode` to **COMPLIANCE** in Settings. New exports use COMPLIANCE once the
+settings cache refreshes (within 30 seconds); existing GOVERNANCE objects keep their mode
+unless an administrator explicitly extends their retention and upgrades their mode. The
+verifier continues to compare each object with its export row's recorded mode and date, so
+an out-of-band mode change is reported as a mismatch. The bucket default retention should
+match the chosen mode and retention days, although the exporter always sends explicit values.
+The settings change is audited and chained. **COMPLIANCE cannot be undone**: protected
+versions cannot be deleted or have retention shortened until expiry, including by administrators.
+
 ## App home
 
 Open `/app/worm_audit` (or `/app/admin/worm_audit` with `parentAppName="admin"`).
@@ -82,7 +136,7 @@ it never renders audit messages or field values. Record links retain the target 
 - Chain status: live link count, latest link time, settled unchained backlog and settling
   count at the configured horizon, latest verification and first open chain break.
   A subsequent full scheduled CHAIN PASS clears a reported break; a selected USER PASS does not.
-- Export status: latest sealed range, COMPLIANCE retention, link/time lag, coverage holes
+- Export status: current lock mode and retention days, latest sealed range and its recorded retention, link/time lag, coverage holes
   between the purge anchor and sealed head, and bucket Object Lock capability. The unsealed
   trailing suffix is lag, not a gap. Provider failures show UNKNOWN with a value-free reason.
 - Retention: configured years, purge anchor, oldest live audit and its next eligible purge date.
@@ -207,8 +261,11 @@ Install qbit-object-storage and configure `exportBucketAlias` (default `worm_aud
 `BucketRole.BACKUP` bucket. **Object Lock must be enabled when the bucket is created**.
 The exporter requires the bucket's `OBJECT_LOCK` capability to be `SUPPORTED`; run the
 object-storage read-only capability probe during setup. Unknown, partial and unsupported
-capabilities all refuse sealing. Every object receives explicit **COMPLIANCE** retention
-until the sealing time plus `retentionYears` (six by default), checked by HEAD after PUT.
+capabilities all refuse sealing. Every object receives the effective `export_lock_mode` and retention until sealing time plus
+`export_retention_days` (GOVERNANCE and 30 days by default), checked by HEAD after PUT. The
+export row records both values. Verification checks that historical mode and retain-until,
+regardless of subsequent settings changes. Missing GOVERNANCE objects are reported as breaks
+with a possible administrator bypass-removal explanation.
 
 The runtime IAM policy needs `s3:PutObject`, `s3:GetObject`, `s3:ListBucket`,
 `s3:GetObjectRetention`, `s3:PutObjectRetention`, and
@@ -284,8 +341,8 @@ $env:CI = 'true'
 ./mvnw.cmd -o verify
 ```
 
-MinIO export acceptance uses the same `RequiresDockerCondition`. It checks COMPLIANCE
-retention, denied version deletion, overwrite version preservation, export verification,
+MinIO export acceptance uses the same `RequiresDockerCondition`. It checks GOVERNANCE
+with 30-day retention and a COMPLIANCE export, denied version deletion (without bypass for GOVERNANCE), overwrite version preservation, export verification,
 exact live-tamper findings through the record action, and refusal of a bucket without lock:
 
 ```powershell
