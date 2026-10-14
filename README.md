@@ -1,48 +1,49 @@
-# QBit Template: Extension
+# QBit WORM Audit
 
-Template repository for creating QQQ Extension QBits - infrastructure extensions, customizers, and action handlers.
+Write-once, read-many (WORM) audit for QQQ applications. The QQQ core audit tables (`audit`, `audit_detail`) and this qbit's own tables become append-only at the database level, every audit row is linked into a hash chain with periodic signed checkpoints, a verification action and a daily job detect tampering, and new audit rows are sealed into an S3 bucket with Object Lock in COMPLIANCE mode (default retention 6 years, the HIPAA audit-record retention). Audit content is hashed and sealed exactly as core writes it; with qbit-secured-data, PHI field values in audit details are already HMACs, so no raw PHI reaches the chain or the sealed copies. This repository currently contains the compiling scaffold; the design is in [docs/DESIGN.md](docs/DESIGN.md) once the spec PR lands.
 
-## What is an Extension QBit?
+## Requirements
 
-Extension QBits extend or enhance how QQQ operates at the infrastructure/framework level. They provide:
-- New backend implementations
-- Authentication mechanisms
-- Audit capabilities
-- Table customizers
-- Action handlers
+Java 21 and QQQ 4.1.0-RC.5 or later. PostgreSQL is the supported database for the append-only enforcement. The Maven wrapper pins Maven 3.9.11.
 
-## Quick Start
+## Install
 
-1. Click "Use this template" to create your QBit
-2. Run `scripts/customize_template.py` to rename the example
-3. Implement your extension logic
-4. Add tests
-5. Publish to Maven repository
-
-## Structure
-
-```
-src/main/java/com/kingsrook/qbits/example/
-├── ExampleExtensionQBitConfig.java    # Configuration
-├── ExampleExtensionQBitProducer.java  # Entry point
-├── customizers/
-│   └── ExampleTableCustomizer.java    # Table customization
-└── actions/
-    └── ExampleActionCustomizer.java   # Action handling
+```xml
+<dependency>
+   <groupId>com.kingsrook.qbits</groupId>
+   <artifactId>qbit-worm-audit</artifactId>
+   <version>0.1.0-SNAPSHOT</version>
+</dependency>
 ```
 
-## Key Characteristics
+## Tables and permissions
 
-- **No QAppSection** - Pure infrastructure
-- **No user-facing tables** (or minimal operational)
-- **Wraps existing tables/processes** with new behavior
-- **Validates dependencies** on other QQQ components
+Planned tables (none are produced yet): `worm_audit_chain`, `worm_audit_checkpoint`, `worm_audit_export`, `worm_audit_verification`, `worm_audit_purge`. Backend names match table names. Permissions use the full `worm_audit` prefix.
 
-## Documentation
+## Configuration
 
-- [Getting Started](docs/00-getting-started.md)
-- [Extension Patterns](docs/01-extension-patterns.md)
+`WormAuditQBitConfig` exposes an optional `tableMetaDataCustomizer` and `retentionYears` (default 6).
+
+## Adopting in another app
+
+```java
+new WormAuditQBitProducer()
+   .withQBitConfig(new WormAuditQBitConfig())
+   .produce(qInstance);
+```
+
+Production currently registers the QBit identity and config only. Database changesets, the object-storage bucket and the alert wiring are documented with each phase.
+
+## Build
+
+```bash
+./mvnw compile
+./mvnw test
+./mvnw verify
+```
+
+Verification includes Checkstyle and JaCoCo gates of 70% instructions and 90% classes. On Windows, use `./mvnw.cmd`.
 
 ## License
 
-AGPL-3.0 - See [LICENSE](LICENSE)
+[Apache License 2.0](LICENSE). Copyright Kingsrook, LLC.
