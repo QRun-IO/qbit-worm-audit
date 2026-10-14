@@ -134,6 +134,31 @@ class PostgresAcceptanceTest
    }
 
    /*******************************************************************************
+    ** Home setup probes see dropped/disabled guards, missing purge and runtime ownership.
+    ** This test uses the same Docker condition as the existing PostgreSQL suite.
+    *******************************************************************************/
+   @Test
+   void homeSetupWarnings() throws Exception
+   {
+      var storage = new com.kingsrook.qbits.wormaudit.demo.MemorySealedStore();
+      var clean = com.kingsrook.qbits.wormaudit.app.WormAuditHomeData.load(config, storage, java.time.Instant.now());
+      assertThat(clean.warnings()).containsExactly("Daily verification has never run");
+      try(var connection = owner())
+      {
+         sql(connection, "DROP TRIGGER worm_audit_row_guard ON audit_detail");
+         sql(connection, "ALTER TABLE worm_audit_chain DISABLE TRIGGER worm_audit_truncate_guard");
+         sql(connection, "DROP FUNCTION public.worm_audit_purge(timestamptz)");
+      }
+      var missing = com.kingsrook.qbits.wormaudit.app.WormAuditHomeData.load(config, storage, java.time.Instant.now());
+      assertThat(missing.warnings()).contains("Missing or disabled worm_audit_row_guard on audit_detail",
+         "Missing or disabled worm_audit_truncate_guard on worm_audit_chain", "Retention purge function is missing");
+      instance = RdbmsTestSupport.instance(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), config, true);
+      QContext.init(instance, new QSession());
+      assertThat(com.kingsrook.qbits.wormaudit.app.WormAuditHomeData.load(config, storage, java.time.Instant.now()).warnings())
+         .contains("Runtime role owns audit table audit", "Runtime role owns audit table worm_audit_purge");
+   }
+
+   /*******************************************************************************
     ** Verify grants triggers lookup rules and spoofed flag.
     *******************************************************************************/
    @Test

@@ -46,6 +46,45 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class RecordIntegrationTest
 {
    /*******************************************************************************
+    ** All record screens have readable labels and full-width sections and lists.
+    *******************************************************************************/
+   @Test
+   void recordScreensHaveReadableLabelsAndFullWidthLists() throws Exception
+   {
+      var instance = init(new WormAuditQBitConfig());
+      Map<String, String> formats = Map.of(
+         WormAuditTables.CHAIN, "Link #%s", WormAuditTables.CHECKPOINT, "Checkpoint #%s",
+         WormAuditTables.EXPORT, "Export #%s (links %s–%s)", WormAuditTables.VERIFICATION, "Verification #%s (%s)",
+         WormAuditTables.PURGE, "Purge #%s (%s)");
+      for(String name : WormAuditTables.ALL)
+      {
+         var table = instance.getTable(name);
+         assertThat(table.getRecordLabelFormat()).isEqualTo(formats.get(name));
+         assertThat(table.getRecordLabelFields()).allMatch(table.getFields()::containsKey);
+         table.getFields().forEach((fieldName, field) ->
+            assertThat(field.getLabel()).as(name + "." + fieldName).isNotBlank().isNotEqualTo(fieldName).doesNotContain("_"));
+         table.getSections().forEach(section ->
+         {
+            assertThat(section.getGridColumns()).isEqualTo(12);
+            if(section.getWidgetName() != null)
+            {
+               assertThat(instance.getWidget(section.getWidgetName()).getGridColumns()).isEqualTo(12);
+            }
+         });
+      }
+      assertThat(instance.getTable(WormAuditTables.EXPORT).getRecordLabelFields()).containsExactly("id", "from_link_id", "to_link_id");
+      for(String name : List.of(WormAuditTables.VERIFICATION, WormAuditTables.PURGE))
+      {
+         assertThat(instance.getTable(name).getRecordLabelFields()).containsExactly("id", "outcome");
+      }
+      var verification = instance.getTable(WormAuditTables.VERIFICATION);
+      assertThat(verification.getSections()).extracting(section -> section.getLabel()).containsExactly("Result", "Scope", "Run", "Chain links");
+      assertThat(verification.getSections().stream().filter(section -> section.getWidgetName() == null)
+         .flatMap(section -> section.getFieldNames().stream()).toList()).containsExactlyInAnyOrderElementsOf(verification.getFields().keySet());
+   }
+
+
+   /*******************************************************************************
     ** Tests and fixtures for event sink.
     *******************************************************************************/
    public static class EventSink implements RecordChangeListenerInterface
@@ -93,6 +132,8 @@ class RecordIntegrationTest
       assertThat(data.getTotalRows()).isEqualTo(2);
       assertThat(data.getQueryOutput().getRecords()).hasSize(2);
       assertThat(data.getViewAllLink()).contains("filter=");
+      String json = com.kingsrook.qqq.backend.core.utils.JsonUtils.toJson(data);
+      assertThat(json).contains("Chain links").doesNotContain("signingKey", "trustedPublicKeys", "sealedStoreSupplier", "privateKey");
       input.setQueryParams(Map.of("id", "999"));
       assertThatThrownBy(() -> new LinkRangeWidget().render(input))
             .hasMessageContaining("was not found");

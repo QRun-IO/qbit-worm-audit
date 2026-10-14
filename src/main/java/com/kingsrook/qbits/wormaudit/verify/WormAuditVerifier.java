@@ -54,13 +54,28 @@ public class WormAuditVerifier
 {
    public static final int PAGE_SIZE = 1000;
    private final WormAuditQBitConfig config;
+   private final int pageSize;
 
    /*******************************************************************************
     ** Bind trust pins and settle horizon.
     *******************************************************************************/
    public WormAuditVerifier(WormAuditQBitConfig config)
    {
+      this(config, PAGE_SIZE);
+   }
+
+
+   /*******************************************************************************
+    ** Smaller pages support constrained hosts and boundary regression tests.
+    *******************************************************************************/
+   public WormAuditVerifier(WormAuditQBitConfig config, int pageSize)
+   {
+      if(pageSize < 1 || pageSize > PAGE_SIZE)
+      {
+         throw (new IllegalArgumentException("Verification page size must be between 1 and 1000"));
+      }
       this.config = config;
+      this.pageSize = pageSize;
    }
 
 
@@ -78,6 +93,15 @@ public class WormAuditVerifier
     *******************************************************************************/
    public VerificationResult verify(Set<Long> selection) throws QException
    {
+      return (verify(selection, Instant.now()));
+   }
+
+
+   /*******************************************************************************
+    ** Clock-injected verification uses the same horizon and snapshot as production.
+    *******************************************************************************/
+   public VerificationResult verify(Set<Long> selection, Instant now) throws QException
+   {
       WormAuditChainer.JVM_LOCK.lock();
       try(QBackendTransaction transaction = QBackendTransaction.openFor(new QueryInput(WormAuditTables.CHAIN)))
       {
@@ -87,7 +111,7 @@ public class WormAuditVerifier
             {
                rdbms.getConnection().setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
             }
-            VerificationResult result = verify(new AuditStore(transaction), selection, Instant.now());
+            VerificationResult result = verify(new AuditStore(transaction), selection, now);
             transaction.commit();
             return (result);
          }
@@ -107,9 +131,9 @@ public class WormAuditVerifier
    /*******************************************************************************
     ** Verify one consistent storage snapshot.
     *******************************************************************************/
-   private VerificationResult verify(AuditStore store, Set<Long> selection, Instant now) throws QException
+   VerificationResult verify(AuditStore store, Set<Long> selection, Instant now) throws QException
    {
-      VerificationResult result = new VerificationResult();
+      VerificationResult result = new VerificationResult(now);
       if(config.getSigningKey() == null)
       {
          result.warn("no signing key configured");
@@ -125,7 +149,7 @@ public class WormAuditVerifier
       CheckpointCursor checkpoints = new CheckpointCursor(store, selection, anchor, result);
       while(true)
       {
-         List<QRecord> page = store.page(WormAuditTables.CHAIN, lastId, PAGE_SIZE);
+         List<QRecord> page = store.page(WormAuditTables.CHAIN, lastId, pageSize);
          if(page.isEmpty())
          {
             break;
@@ -150,9 +174,9 @@ public class WormAuditVerifier
          }
          Map<Long, QRecord> details = new HashMap<>();
          List<Long> ids = new ArrayList<>(detailIds);
-         for(int start = 0; start < ids.size(); start += PAGE_SIZE)
+         for(int start = 0; start < ids.size(); start += pageSize)
          {
-            details.putAll(AuditStore.index(store.in("auditDetail", "id", ids.subList(start, Math.min(start + PAGE_SIZE, ids.size())))));
+            details.putAll(AuditStore.index(store.in("auditDetail", "id", ids.subList(start, Math.min(start + pageSize, ids.size())))));
          }
          for(QRecord link : page)
          {
@@ -180,8 +204,8 @@ public class WormAuditVerifier
             previous = link.getValueString("link_hash");
             lastId = id;
          }
-         checkpoints.through(lastId);
       }
+      // The main scan's page is out of scope before checkpoint pages are read.
       checkpoints.through(Long.MAX_VALUE);
       result.scope(checked, first, last);
       if(missing != null)
@@ -195,9 +219,13 @@ public class WormAuditVerifier
          {
             store.completeness(cutoff, result);
          }
-         else
+         else if(store.isMemory())
          {
             completeness(store, store.all(WormAuditTables.CHAIN), cutoff, result);
+         }
+         else
+         {
+            pagedCompleteness(store, cutoff, result);
          }
       }
       return (result);
@@ -259,6 +287,73 @@ public class WormAuditVerifier
       catch(QException | IllegalArgumentException e)
       {
          result.add(id, auditId, "Break at link " + number(id) + " (audit " + number(auditId) + "): " + e.getMessage());
+      }
+   }
+
+
+   /*******************************************************************************
+    ** Portable completeness for non-SQL backends. Trade repeated scans for bounded
+    ** memory; only the memory backend uses the whole-chain coverage index.
+    *******************************************************************************/
+   private void pagedCompleteness(AuditStore store, Instant cutoff, VerificationResult result) throws QException
+   {
+      for(String table : List.of("audit", "auditDetail"))
+      {
+         long after = 0;
+         while(true)
+         {
+            List<QRecord> rows = store.page(table, after, pageSize);
+            if(rows.isEmpty())
+            {
+               break;
+            }
+            Map<Long, Integer> counts = new HashMap<>();
+            for(QRecord row : rows)
+            {
+               QRecord audit = table.equals("audit") ? row : store.get("audit", row.getValueLong("auditId"));
+               if(audit == null || audit.getValueInstant("timestamp") == null || audit.getValueInstant("timestamp").isBefore(cutoff))
+               {
+                  counts.put(row.getValueLong("id"), 0);
+                  if(table.equals("audit") && audit.getValueInstant("timestamp") == null)
+                  {
+                     result.add(null, row.getValueLong("id"), "audit " + number(row.getValueLong("id")) + " has no timestamp");
+                  }
+               }
+            }
+            long linkAfter = 0;
+            while(!counts.isEmpty())
+            {
+               List<QRecord> links = store.page(WormAuditTables.CHAIN, linkAfter, pageSize);
+               if(links.isEmpty())
+               {
+                  break;
+               }
+               for(QRecord link : links)
+               {
+                  if(table.equals("audit"))
+                  {
+                     if("AUDIT".equals(link.getValueString("kind")))
+                     {
+                        counts.computeIfPresent(link.getValueLong("audit_id"), (id, count) -> count + 1);
+                     }
+                  }
+                  else
+                  {
+                     try
+                     {
+                        AuditStore.detailIds(link).forEach(id -> counts.computeIfPresent(id, (key, count) -> count + 1));
+                     }
+                     catch(IllegalArgumentException e)
+                     {
+                        // Malformed coverage was reported by content verification.
+                     }
+                  }
+               }
+               linkAfter = links.getLast().getValueLong("id");
+            }
+            counts.forEach((id, count) -> coverage(table.equals("audit") ? "audit" : "audit_detail", id, count, result));
+            after = rows.getLast().getValueLong("id");
+         }
       }
    }
 
@@ -429,7 +524,7 @@ public class WormAuditVerifier
          String head = null;
          while(cursor < to)
          {
-            List<QRecord> page = store.page(WormAuditTables.CHAIN, cursor, (int) Math.min(PAGE_SIZE, to - cursor));
+            List<QRecord> page = store.page(WormAuditTables.CHAIN, cursor, (int) Math.min(pageSize, to - cursor));
             if(page.isEmpty())
             {
                break;

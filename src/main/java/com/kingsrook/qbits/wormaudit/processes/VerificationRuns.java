@@ -75,11 +75,11 @@ public final class VerificationRuns
          {
             if(result.passed())
             {
-               QAlerts.resolve("worm_audit.chain.break", "chain", "Audit chain verification passed");
+               QAlerts.resolve("wormaudit.chain.break", "chain", "Audit chain verification passed");
             }
             else
             {
-               QAlerts.raise(new AlertSignal("worm_audit.chain.break").withDedupKey("chain")
+               QAlerts.raise(new AlertSignal("wormaudit.chain.break").withDedupKey("chain")
                   .withTitle(result.getBreaks().getFirst().reason()).withRecordRef(new AlertRecordRef(WormAuditTables.VERIFICATION, row.getValue("id"))));
             }
          }
@@ -89,7 +89,7 @@ public final class VerificationRuns
       {
          if(scheduled)
          {
-            QAlerts.heartbeat("worm_audit.verify.daily");
+            QAlerts.heartbeat("wormaudit.verify.daily");
          }
       }
    }
@@ -109,9 +109,18 @@ public final class VerificationRuns
     *******************************************************************************/
    public static QRecord save(VerificationResult result, String trigger, Long exportId) throws QException
    {
+      return (save(result, trigger, exportId, Instant.now()));
+   }
+
+
+   /*******************************************************************************
+    ** Clock-injected persistence for genuine historical verification runs.
+    *******************************************************************************/
+   public static QRecord save(VerificationResult result, String trigger, Long exportId, Instant finishedAt) throws QException
+   {
       String user = QContext.getQSession() == null || QContext.getQSession().getUser() == null ? "system" : QContext.getQSession().getUser().getIdReference();
       QRecord row = new QRecord().withValue("kind", exportId == null ? "CHAIN" : "SEALED_EXPORT").withValue("export_id", exportId).withValue("trigger", trigger)
-         .withValue("started_at", result.getStartedAt()).withValue("finished_at", Instant.now())
+         .withValue("started_at", result.getStartedAt()).withValue("finished_at", finishedAt)
          .withValue("from_link_id", result.getFromLinkId()).withValue("to_link_id", result.getToLinkId())
          .withValue("links_checked", result.getLinksChecked()).withValue("outcome", result.passed() ? "PASS" : "FAIL")
          .withValue("break_count", result.getBreakCount()).withValue("run_by", user);

@@ -108,7 +108,9 @@ public class SealedExportVerifier
                rdbms.getConnection().setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
             }
             SealedStore storage = suppliedStorage == null
-               ? new ObjectStorageSealedStore(export.getValueString("bucket_alias"), "verify-" + export.getValueLong("id")) : suppliedStorage;
+               ? config.getSealedStoreSupplier() == null || !config.getExportBucketAlias().equals(export.getValueString("bucket_alias"))
+                  ? new ObjectStorageSealedStore(export.getValueString("bucket_alias"), "verify-" + export.getValueLong("id"))
+                  : config.getSealedStoreSupplier().get() : suppliedStorage;
             Map<String, Object> versions = ExportFiles.parse(export.getValueString("object_versions").getBytes(StandardCharsets.UTF_8));
             for(String name : ExportFiles.NAMES)
             {

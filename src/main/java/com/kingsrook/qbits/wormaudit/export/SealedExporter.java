@@ -166,21 +166,21 @@ public class SealedExporter
       {
          config.validate();
          Result result = lockedRun(now);
-         QAlerts.resolve("worm_audit.export.failed", "export", "Sealed audit export completed");
+         QAlerts.resolve("wormaudit.export.failed", "export", "Sealed audit export completed");
          return (result);
       }
       catch(Exception e)
       {
          // All exposed failures originate here or use a fixed, value-free code.
          String reason = e instanceof ExportFailure ? e.getMessage() : "Sealed export failed: storage or database operation failed";
-         QAlerts.raise(new AlertSignal("worm_audit.export.failed").withDedupKey("export").withTitle(reason));
+         QAlerts.raise(new AlertSignal("wormaudit.export.failed").withDedupKey("export").withTitle(reason));
          return (new Result(null, reason, true));
       }
       finally
       {
          if("SCHEDULE".equals(trigger))
          {
-            QAlerts.heartbeat("worm_audit.export.daily");
+            QAlerts.heartbeat("wormaudit.export.daily");
          }
       }
    }
@@ -214,7 +214,8 @@ public class SealedExporter
             else
             {
                SealedStore storage = suppliedStorage == null
-                  ? new ObjectStorageSealedStore(config.getExportBucketAlias(), java.util.UUID.randomUUID().toString()) : suppliedStorage;
+                  ? config.getSealedStoreSupplier() == null ? new ObjectStorageSealedStore(config.getExportBucketAlias(), java.util.UUID.randomUUID().toString())
+                     : config.getSealedStoreSupplier().get() : suppliedStorage;
                result = seal(store, storage, scope, now.truncatedTo(ChronoUnit.MILLIS));
             }
             transaction.commit();

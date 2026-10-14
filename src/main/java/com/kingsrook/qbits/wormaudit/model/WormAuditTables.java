@@ -31,6 +31,9 @@ import com.kingsrook.qqq.backend.core.model.metadata.fields.QFieldType;
 import com.kingsrook.qqq.backend.core.model.metadata.layout.QIcon;
 import com.kingsrook.qqq.backend.core.model.metadata.permissions.PermissionLevel;
 import com.kingsrook.qqq.backend.core.model.metadata.permissions.QPermissionRules;
+import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValue;
+import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValueSource;
+import com.kingsrook.qqq.backend.core.model.metadata.possiblevalues.QPossibleValueSourceType;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QFieldSection;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.Tier;
@@ -39,7 +42,7 @@ import com.kingsrook.qqq.backend.module.rdbms.model.metadata.RDBMSTableBackendDe
 
 /*******************************************************************************
  ** Append-only sidecar tables. Snake-case fields map directly to DDL columns.
- ** Export metadata is the integration hook for phase (b); no export runs here.
+ ** Labels also supply the standard QQQ app navigation wording.
  *******************************************************************************/
 public final class WormAuditTables
 {
@@ -79,9 +82,9 @@ public final class WormAuditTables
     *******************************************************************************/
    private static QTableMetaData table(WormAuditQBitConfig config, String name, String label, String fields)
    {
-      QTableMetaData table = new QTableMetaData().withName(name).withLabel(label)
+      QTableMetaData table = new QTableMetaData().withName(name).withLabel(navigationLabel(name))
          .withBackendName(config.getBackendName()).withBackendDetails(new RDBMSTableBackendDetails().withTableName(name))
-         .withPrimaryKeyField("id").withRecordLabelFields("id").withRecordLabelFormat("%s")
+         .withPrimaryKeyField("id").withRecordLabelFields("id").withRecordLabelFormat(label + " #%s")
          .withAuditRules(new QAuditRules().withAuditLevel(AuditLevel.NONE))
          .withPermissionRules(new QPermissionRules().withLevel(PermissionLevel.READ_INSERT_EDIT_DELETE_PERMISSIONS).withPermissionBaseName(name));
       for(String spec : fields.split(" "))
@@ -94,7 +97,7 @@ public final class WormAuditTables
             case "T" -> QFieldType.TEXT;
             default -> QFieldType.STRING;
          };
-         table.withField(new QFieldMetaData(parts[0], type).withBackendName(parts[0]));
+         table.withField(new QFieldMetaData(parts[0], type).withBackendName(parts[0]).withLabel(fieldLabel(parts[0])));
       }
       for(String reference : List.of("from_link_id", "to_link_id", "first_break_link_id", "anchor_link_id"))
       {
@@ -114,11 +117,126 @@ public final class WormAuditTables
       {
          table.getField("export_id").withPossibleValueSourceName(EXPORT);
       }
-      table.withSection(new QFieldSection("record", label, new QIcon("fact_check"), Tier.T1, new ArrayList<>(table.getFields().keySet())));
+      switch(name)
+      {
+         case CHAIN -> table.withRecordLabelFormat("Link #%s");
+         case EXPORT -> table.withRecordLabelFormatAndFields("Export #%s (links %s–%s)", "id", "from_link_id", "to_link_id");
+         case VERIFICATION, PURGE -> table.withRecordLabelFormatAndFields(label + " #%s (%s)", "id", "outcome");
+         default ->
+         {
+         }
+      }
+      if(table.getFields().containsKey("kind"))
+      {
+         table.getField("kind").withInlinePossibleValueSource(new QPossibleValueSource().withName(name + "_kind")
+            .withType(QPossibleValueSourceType.ENUM).withIdType(QFieldType.STRING).withEnumValues(List.of(new QPossibleValue<>("AUDIT", "Audit"),
+               new QPossibleValue<>("LATE_DETAIL", "Late detail"), new QPossibleValue<>("CHAIN", "Chain"),
+               new QPossibleValue<>("SEALED_EXPORT", "Sealed export"))));
+      }
+      if(table.getFields().containsKey("outcome"))
+      {
+         table.getField("outcome").withInlinePossibleValueSource(new QPossibleValueSource().withName(name + "_outcome")
+            .withType(QPossibleValueSourceType.ENUM).withIdType(QFieldType.STRING).withEnumValues(List.of(new QPossibleValue<>("PASS", "Pass"),
+               new QPossibleValue<>("FAIL", "Fail"), new QPossibleValue<>("PURGED", "Purged"), new QPossibleValue<>("REFUSED", "Refused"))));
+      }
+      if(VERIFICATION.equals(name))
+      {
+         table.withSection(new QFieldSection("result", "Result", new QIcon("fact_check"), Tier.T2,
+            List.of("id", "outcome", "break_count", "first_break_link_id", "first_break_audit_id", "first_break_reason")).withGridColumns(12));
+         table.withSection(new QFieldSection("scope", "Scope", new QIcon("link"), Tier.T2,
+            List.of("kind", "trigger", "from_link_id", "to_link_id", "links_checked", "export_id")).withGridColumns(12));
+         table.withSection(new QFieldSection("run", "Run", new QIcon("schedule"), Tier.T2,
+            List.of("started_at", "finished_at", "run_by")).withGridColumns(12));
+      }
+      else
+      {
+         table.withSection(new QFieldSection("record", label, new QIcon("fact_check"), Tier.T1,
+            new ArrayList<>(table.getFields().keySet())).withGridColumns(12));
+      }
       if(List.of(CHECKPOINT, EXPORT, VERIFICATION).contains(name))
       {
-         table.withSection(new QFieldSection("links", new QIcon("link"), Tier.T2).withLabel("Chain links").withWidgetName(name + "_links"));
+         table.withSection(new QFieldSection("links", new QIcon("link"), Tier.T2).withLabel("Chain links")
+            .withWidgetName(name + "_links").withGridColumns(12));
       }
       return (table);
+   }
+
+
+   /*******************************************************************************
+    ** Core RC.5 shares the table label with its navigation tree node.
+    *******************************************************************************/
+   public static String navigationLabel(String name)
+   {
+      return (switch(name)
+      {
+         case CHAIN -> "Audit Chain";
+         case CHECKPOINT -> "Checkpoints";
+         case EXPORT -> "Sealed Exports";
+         case VERIFICATION -> "Verifications";
+         default -> "Purges";
+      });
+   }
+
+
+   /*******************************************************************************
+    ** Plain record labels independent of physical column names.
+    *******************************************************************************/
+   private static String fieldLabel(String name)
+   {
+      return (switch(name)
+      {
+         case "id" -> "ID";
+         case "kind" -> "Kind";
+         case "audit_id" -> "Audit";
+         case "detail_ids" -> "Detail ids";
+         case "prev_hash" -> "Previous hash";
+         case "link_hash" -> "Link hash";
+         case "chained_at" -> "Chained";
+         case "from_link_id" -> "From link";
+         case "to_link_id" -> "To link";
+         case "link_count" -> "Links";
+         case "head_hash" -> "Head hash";
+         case "merkle_root" -> "Merkle root";
+         case "algorithm" -> "Algorithm";
+         case "key_id" -> "Key ID";
+         case "public_key" -> "Public key";
+         case "signature" -> "Signature";
+         case "created_at" -> "Created";
+         case "from_checkpoint_id" -> "From checkpoint";
+         case "to_checkpoint_id" -> "To checkpoint";
+         case "bucket_alias" -> "Bucket alias";
+         case "object_prefix" -> "Object prefix";
+         case "object_versions" -> "Object versions";
+         case "manifest_key" -> "Manifest key";
+         case "manifest_sha256" -> "Manifest SHA-256";
+         case "prev_manifest_sha256" -> "Previous manifest SHA-256";
+         case "object_count" -> "Objects";
+         case "byte_count" -> "Bytes";
+         case "lock_mode" -> "Lock mode";
+         case "retain_until" -> "Retain until";
+         case "sealed_at" -> "Sealed";
+         case "trigger" -> "Trigger";
+         case "started_at" -> "Started";
+         case "finished_at" -> "Finished";
+         case "links_checked" -> "Links checked";
+         case "outcome" -> "Outcome";
+         case "break_count" -> "Breaks";
+         case "first_break_link_id" -> "First break link";
+         case "first_break_audit_id" -> "First break audit";
+         case "first_break_reason" -> "First break";
+         case "export_id" -> "Sealed export";
+         case "run_by" -> "Run by";
+         case "requested_at" -> "Requested";
+         case "requested_by" -> "Requested by";
+         case "cutoff" -> "Cutoff";
+         case "retention_interval" -> "Retention interval";
+         case "reason" -> "Reason";
+         case "audits_deleted" -> "Audits deleted";
+         case "details_deleted" -> "Details deleted";
+         case "links_deleted" -> "Links deleted";
+         case "anchor_link_id" -> "Anchor link";
+         case "anchor_hash" -> "Anchor hash";
+         default -> throw new IllegalArgumentException("Missing field label: " + name);
+      });
    }
 }

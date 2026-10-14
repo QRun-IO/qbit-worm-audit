@@ -55,7 +55,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /*******************************************************************************
  ** Tests and fixtures for phi canary test.
  *******************************************************************************/
-class PhiCanaryTest
+public class PhiCanaryTest
 {
    // RC.5 has AiFieldMetaData but not DataClassification; use a test-local marker.
    /*******************************************************************************
@@ -93,6 +93,10 @@ class PhiCanaryTest
             {
                for(String column : List.of("oldValue", "newValue"))
                {
+                  if(detail.getValueString(column) == null)
+                  {
+                     continue;
+                  }
                   try
                   {
                      Mac mac = Mac.getInstance("HmacSHA256");
