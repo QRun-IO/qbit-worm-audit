@@ -229,11 +229,21 @@ class PostgresAcceptanceTest
                               assertThat(((SQLException) e).getSQLState())
                                     .isEqualTo("42501"));
             sql(c, "GRANT UPDATE, DELETE, TRUNCATE ON " + table + " TO app");
-            for(String operation :
-                  List.of(
-                        "UPDATE " + table + " SET id=id",
-                        "DELETE FROM " + table,
-                        "TRUNCATE " + table))
+            // A table a foreign key references (audit, checkpoint, export) refuses TRUNCATE before
+            // its guard runs; TRUNCATE ... CASCADE (owner) reaches the guards, which refuse it.
+            if(count(c, "SELECT count(*) FROM pg_constraint WHERE contype='f' AND confrelid='" + table + "'::regclass") > 0)
+            {
+               assertThatThrownBy(() -> sql(runtime, "TRUNCATE " + table))
+                  .isInstanceOf(SQLException.class)
+                  .hasMessageContaining("referenced in a foreign key constraint");
+               assertThatThrownBy(() -> sql(c, "TRUNCATE " + table + " CASCADE"))
+                  .isInstanceOf(SQLException.class)
+                  .hasMessageContaining("worm_audit:");
+            }
+            boolean referenced = count(c, "SELECT count(*) FROM pg_constraint WHERE contype='f' AND confrelid='" + table + "'::regclass") > 0;
+            for(String operation : referenced
+               ? List.of("UPDATE " + table + " SET id=id", "DELETE FROM " + table)
+               : List.of("UPDATE " + table + " SET id=id", "DELETE FROM " + table, "TRUNCATE " + table))
             {
                assertThatThrownBy(() -> sql(runtime, operation))
                         .isInstanceOf(SQLException.class)
@@ -581,6 +591,91 @@ class PostgresAcceptanceTest
       assertThat(STORE.all(WormAuditTables.CHAIN).stream().flatMap(r -> AuditStore.detailIds(r).stream()).toList()).containsExactly(2L, 3L);
       assertThat(new WormAuditVerifier(config).verify().getBreaks()).anyMatch(b -> b.reason().contains("audit_detail 1 is not covered"));
    }
+
+
+   /*******************************************************************************
+    ** Referential integrity guardrail: every table reference of the WORM tables
+    ** (possible-value fields, and the chain's audit header) has a RESTRICT
+    ** foreign key, or an exemption with its reason. Nothing may cascade into or
+    ** out of audit evidence.
+    *******************************************************************************/
+   @Test
+   void everyReferenceHasARestrictForeignKeyOrAReason() throws Exception
+   {
+      String links = "the retention purge deletes the sealed prefix of chain links; this evidence row outlives the links it names";
+      java.util.Map<String, String> exempt = java.util.Map.of(
+         "worm_audit_checkpoint.from_link_id", links,
+         "worm_audit_checkpoint.to_link_id", links,
+         "worm_audit_export.from_link_id", links,
+         "worm_audit_export.to_link_id", links,
+         "worm_audit_verification.from_link_id", links,
+         "worm_audit_verification.to_link_id", links,
+         "worm_audit_verification.first_break_link_id", links + "; a break may name a link that is missing",
+         "worm_audit_purge.anchor_link_id", "the anchor is the last link the same purge deleted");
+
+      java.util.Set<String> references = new java.util.TreeSet<>(List.of("worm_audit_chain.audit_id"));
+      for(var table : instance.getTables().values())
+      {
+         if(!table.getName().startsWith("worm_audit_"))
+         {
+            continue;
+         }
+         for(var field : table.getFields().values())
+         {
+            if(field.getPossibleValueSourceName() != null && instance.getTable(field.getPossibleValueSourceName()) != null)
+            {
+               references.add(table.getName() + "." + field.getBackendName());
+            }
+         }
+      }
+
+      java.util.Map<String, String> foreignKeys = new java.util.HashMap<>();
+      try(var c = owner(); var s = c.createStatement(); var r = s.executeQuery("""
+         SELECT c.conrelid::regclass::text || '.' || a.attname, c.confdeltype::text || c.convalidated::text
+         FROM pg_constraint c JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+         WHERE c.contype = 'f' AND c.conrelid::regclass::text LIKE 'worm_audit_%'"""))
+      {
+         while(r.next())
+         {
+            foreignKeys.put(r.getString(1), r.getString(2));
+         }
+      }
+      assertThat(references.stream().filter(ref -> !foreignKeys.containsKey(ref) && !exempt.containsKey(ref)).toList())
+         .as("references without a foreign key (add one to worm-audit.sql, or an exemption with a reason)").isEmpty();
+      assertThat(foreignKeys).as("RESTRICT and validated").containsOnlyKeys("worm_audit_chain.audit_id", "worm_audit_export.from_checkpoint_id",
+         "worm_audit_export.to_checkpoint_id", "worm_audit_verification.export_id").allSatisfy((k, v) -> assertThat(v).isEqualTo("rtrue"));
+   }
+
+
+
+   /*******************************************************************************
+    ** Upgrading a schema whose chain names a missing audit header: the link is
+    ** evidence, so it is copied to qqq_fk_quarantine (KEPT), never changed, and
+    ** the constraint is added NOT VALID (new links are still checked). A re-run
+    ** changes nothing.
+    *******************************************************************************/
+   @Test
+   void orphanEvidenceIsKeptAndTheConstraintIsNotValidated() throws Exception
+   {
+      audit(1);
+      new WormAuditChainer(config).chainOnce();
+      try(var c = owner())
+      {
+         sql(c, "ALTER TABLE worm_audit_chain DROP CONSTRAINT fk_worm_audit_chain_audit_id");
+         sql(c, "ALTER TABLE audit DISABLE TRIGGER worm_audit_row_guard; DELETE FROM audit WHERE id = 1; ALTER TABLE audit ENABLE TRIGGER worm_audit_row_guard");
+         sql(c, WormAuditDdl.postgres(config));
+         sql(c, WormAuditDdl.postgres(config));
+         assertThat(count(c, "SELECT count(*) FROM qqq_fk_quarantine WHERE table_name = 'worm_audit_chain' AND column_name = 'audit_id'"
+            + " AND row_id = '1' AND missing_parent_id = '1' AND action = 'KEPT' AND row_data LIKE '%\"link_hash\"%'")).isEqualTo(1);
+         assertThat(count(c, "SELECT count(*) FROM qqq_fk_quarantine")).isEqualTo(1);
+         assertThat(count(c, "SELECT count(*) FROM worm_audit_chain WHERE id = 1 AND audit_id = 1")).isEqualTo(1);
+         assertThat(count(c, "SELECT count(*) FROM pg_constraint WHERE conname = 'fk_worm_audit_chain_audit_id' AND NOT convalidated")).isEqualTo(1);
+         assertThatThrownBy(() -> sql(c, "INSERT INTO worm_audit_chain(id,kind,audit_id,detail_ids,prev_hash,link_hash,chained_at)"
+            + " VALUES(99,'AUDIT',404,'',repeat('0',64),repeat('0',64),now())"))
+            .hasMessageContaining("fk_worm_audit_chain_audit_id");
+      }
+   }
+
 
 
    /*******************************************************************************
