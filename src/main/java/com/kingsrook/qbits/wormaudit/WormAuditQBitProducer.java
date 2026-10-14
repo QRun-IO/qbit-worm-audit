@@ -44,6 +44,7 @@ import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.qbits.QBitMetaDataProducer;
 import com.kingsrook.qqq.backend.core.model.metadata.scheduleing.quartz.QuartzSchedulerMetaData;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.QTableMetaData;
+import com.kingsrook.qqq.backend.core.model.session.QSystemUserSession;
 
 
 /*******************************************************************************
@@ -192,9 +193,14 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
       var previousTransaction = QContext.getQBackendTransaction();
       try
       {
-         // Production is still assembling the host metadata. Do not validate it mid-build.
+         ////////////////////////////////////////////////////////////////////////////
+         // Production is still assembling the host metadata. Do not validate it   //
+         // mid-build. The startup settings read is system work: run it as the     //
+         // core system user. A plain tokenless QSession fails session validation  //
+         // under token-based host authentication (OAuth2, Auth0).                 //
+         ////////////////////////////////////////////////////////////////////////////
          QContext.setQInstance(qInstance);
-         QContext.setQSession(new com.kingsrook.qqq.backend.core.model.session.QSession());
+         QContext.setQSession(new QSystemUserSession(qInstance));
          QContext.setTransaction(null);
          addProcesses(output, qBit);
       }
