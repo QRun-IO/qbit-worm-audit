@@ -469,8 +469,8 @@ BEGIN
 END;
 $fn$;
 
--- The array index worm_audit_chain_detail_coverage is no longer used by this release. It stays until a later
--- changeset drops it, so a previous-release writer still running during a rolling deploy keeps its indexed probe.
+-- The array index worm_audit_chain_detail_coverage is no longer used by this release. It stays until
+-- a later migration drops it, so a previous-release writer still running during a rolling deploy keeps its indexed probe.
 
 DROP TRIGGER IF EXISTS worm_audit_row_guard ON public.worm_audit_chain_detail;
 CREATE TRIGGER worm_audit_row_guard BEFORE UPDATE OR DELETE ON public.worm_audit_chain_detail
