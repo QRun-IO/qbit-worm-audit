@@ -107,7 +107,12 @@ class WormAuditSettingsSeedTest
       Matcher matcher = Pattern.compile("(?m)^INSERT INTO\\s+(\\S+)").matcher(ddl);
       while(matcher.find())
       {
-         assertThat(matcher.group(1)).as("every top-level INSERT in the script targets the settings table, not a log").isEqualTo("public.worm_audit_settings");
+         //////////////////////////////////////////////////////////////////////////
+         // worm-audit:13 backfills detail coverage from links that already exist: //
+         // derived from the chain, never seeded content.                         //
+         //////////////////////////////////////////////////////////////////////////
+         assertThat(matcher.group(1)).as("every top-level INSERT in the script targets the settings table, not a log")
+            .isIn("public.worm_audit_settings", "public.worm_audit_chain_detail(detail_id,");
       }
    }
 

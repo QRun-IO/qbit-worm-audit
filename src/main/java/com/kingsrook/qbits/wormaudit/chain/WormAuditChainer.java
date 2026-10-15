@@ -128,7 +128,10 @@ public class WormAuditChainer
       String previous = tail == null ? anchor.getValueString("anchor_hash") : tail.getValueString("link_hash");
       List<QRecord> appended = new ArrayList<>();
       Instant cutoff = now.minusSeconds(settings.settle_horizon_seconds());
-      List<QRecord> audits = store.unchained(cutoff, config.getBatchSize());
+      SweepFloors floors = SweepFloors.of(config);
+      SweepFloors.Observation observed = store.isRdbms() ? floors.observe(now, store.maxId("audit"), store.maxId("auditDetail")) : null;
+      boolean full = floors.fullSweepDue(now);
+      List<QRecord> audits = store.unchained(cutoff, config.getBatchSize(), full ? 0L : floors.audit());
       Map<Long, QRecord> details = AuditStore.index(store.in("auditDetail", "auditId", audits.stream().map(r -> r.getValueLong("id")).toList()));
       Map<Long, List<QRecord>> grouped = details.values().stream().collect(Collectors.groupingBy(r -> r.getValueLong("auditId")));
       int lateDetails = 0;
@@ -150,7 +153,7 @@ public class WormAuditChainer
       insertLinks(store, appended);
       int linkCount = appended.size();
       appended.clear();
-      details = AuditStore.index(store.lateDetails(cutoff, settings.late_detail_lookback_hours(), config.getBatchSize()));
+      details = AuditStore.index(store.lateDetails(cutoff, settings.late_detail_lookback_hours(), config.getBatchSize(), full ? 0L : floors.detail()));
       grouped = details.values().stream().collect(Collectors.groupingBy(r -> r.getValueLong("auditId"), TreeMap::new, Collectors.toList()));
       Map<Long, QRecord> headers = AuditStore.index(store.in("audit", "id", grouped.keySet()));
       for(var entry : grouped.entrySet())
@@ -166,18 +169,37 @@ public class WormAuditChainer
          }
       }
       insertLinks(store, appended);
+      if(observed != null)
+      {
+         floors.swept(observed, now.minusSeconds(settings.settle_horizon_seconds()).minus(SweepFloors.MARGIN),
+            audits.size() < config.getBatchSize(), details.size() < config.getBatchSize(), full ? now : null);
+      }
       return (new Counts(audits.size(), lateDetails, linkCount + appended.size(), checkpoint(store, now, settings), false));
    }
 
 
    /*******************************************************************************
-    ** Persist bounded insert batches inside the writer transaction.
+    ** Persist bounded insert batches inside the writer transaction. PostgreSQL's
+    ** chain trigger writes the detail coverage rows; elsewhere the writer does,
+    ** in the same transaction, so coverage never diverges from the chain.
     *******************************************************************************/
    private void insertLinks(AuditStore store, List<QRecord> links) throws QException
    {
       for(int start = 0; start < links.size(); start += config.getBatchSize())
       {
          store.insert(WormAuditTables.CHAIN, links.subList(start, Math.min(start + config.getBatchSize(), links.size())));
+      }
+      if(!store.isPostgres())
+      {
+         List<QRecord> coverage = new ArrayList<>();
+         for(QRecord link : links)
+         {
+            AuditStore.detailIds(link).forEach(id -> coverage.add(new QRecord().withValue("detail_id", id).withValue("chain_id", link.getValueLong("id"))));
+         }
+         for(int start = 0; start < coverage.size(); start += config.getBatchSize())
+         {
+            store.insert(WormAuditTables.CHAIN_DETAIL, coverage.subList(start, Math.min(start + config.getBatchSize(), coverage.size())));
+         }
       }
    }
 

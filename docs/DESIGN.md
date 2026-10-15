@@ -192,7 +192,13 @@ chain would need the canonical form in SQL. The design instead uses **one chaine
   `kind = LATE_DETAIL`, covering exactly those detail ids. Verification flags any detail not
   covered by exactly one link.
 - Unique constraints back the lock: `UNIQUE (audit_id) WHERE kind = 'AUDIT'`, and the detail
-  coverage.
+  coverage: `worm_audit_chain_detail (detail_id PRIMARY KEY, chain_id)`, one append-only row per
+  covered detail, written by the chain insert trigger in the same statement as the link. The
+  writer finds uncovered details with a primary-key probe of it; verification still counts
+  coverage from the links' own `detail_ids` and breaks if the table disagrees.
+- Each tick reads only rows above per-JVM sweep floors: the highest audit and detail ids seen at
+  least (settle horizon + 5 minutes) before the last complete sweep. After a restart and once an
+  hour a tick ignores the floors, so a row whose transaction commits even later is still chained.
 
 Why not per-partition chains: they make each partition's chain shorter but multiply heads,
 checkpoints and verification state, and they still need a writer per partition. One chainer

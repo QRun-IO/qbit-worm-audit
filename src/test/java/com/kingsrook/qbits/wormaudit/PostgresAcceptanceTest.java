@@ -328,6 +328,11 @@ class PostgresAcceptanceTest
       assertThat(purge.getValueLong("details_deleted")).isEqualTo(2);
       assertThat(purge.getValueLong("links_deleted")).isEqualTo(2);
       assertThat(purge.getValueString("anchor_hash")).isEqualTo(anchor);
+      try(var c = owner())
+      {
+         assertThat(count(c, "SELECT count(*) FROM worm_audit_chain_detail WHERE chain_id <= 2")).as("coverage purged with its links").isZero();
+         assertThat(count(c, "SELECT count(*) FROM worm_audit_chain_detail")).isZero();
+      }
       assertThat(new WormAuditVerifier(config).verify().getBreaks()).isEmpty();
       detail(3, 3);
       new WormAuditChainer(config).chainOnce();
@@ -594,6 +599,69 @@ class PostgresAcceptanceTest
 
 
    /*******************************************************************************
+    ** The chain trigger writes one coverage row per detail with its link; the
+    ** table is write-once, backfilled from the chain by the DDL, purged with its
+    ** links, and verification breaks if it ever disagrees with the chain.
+    *******************************************************************************/
+   @Test
+   void detailCoverageTableIsWrittenByTheTriggerBackfilledAndWriteOnce() throws Exception
+   {
+      // The fixture's audit headers are years old; poll them as late-detail candidates.
+      setting("late_detail_lookback_hours", 24 * 365 * 10);
+      audit(1);
+      detail(1, 1);
+      detail(2, 1);
+      audit(2);
+      detail(3, 2);
+      var writer = new WormAuditChainer(config);
+      assertThat(writer.chainOnce().links()).isEqualTo(2);
+      detail(4, 1);
+      assertThat(writer.chainOnce().lateDetails()).isEqualTo(1);
+      assertThat(writer.chainOnce().links()).isZero();
+      String pairs = "SELECT string_agg(detail_id || '@' || chain_id, ',' ORDER BY detail_id) FROM worm_audit_chain_detail";
+      try(var c = owner(); var runtime = app(); var s = c.createStatement())
+      {
+         try(var r = s.executeQuery(pairs))
+         {
+            r.next();
+            assertThat(r.getString(1)).isEqualTo("1@1,2@1,3@2,4@3");
+         }
+         assertThatThrownBy(() -> sql(runtime, "INSERT INTO worm_audit_chain_detail(detail_id,chain_id) VALUES(4,1)"))
+            .isInstanceOf(SQLException.class).satisfies(e -> assertThat(((SQLException) e).getSQLState()).isEqualTo("23505"));
+         for(String privilege : List.of("UPDATE", "DELETE", "TRUNCATE"))
+         {
+            assertThat(count(c, "SELECT has_table_privilege('app','worm_audit_chain_detail','" + privilege + "')::int")).isZero();
+         }
+         sql(c, "GRANT UPDATE, DELETE, TRUNCATE ON worm_audit_chain_detail TO app");
+         for(String operation : List.of("UPDATE worm_audit_chain_detail SET chain_id=chain_id", "DELETE FROM worm_audit_chain_detail", "TRUNCATE worm_audit_chain_detail"))
+         {
+            assertThatThrownBy(() -> sql(runtime, operation)).isInstanceOf(SQLException.class).hasMessageContaining("worm_audit:")
+               .satisfies(e -> assertThat(((SQLException) e).getSQLState()).isEqualTo("P0001"));
+         }
+
+         ///////////////////////////////////////////////////////////////////////
+         // An install that predates the table: the DDL backfills it from the  //
+         // chain, and the writer then finds nothing left to chain.            //
+         ///////////////////////////////////////////////////////////////////////
+         sql(c, "DROP TABLE worm_audit_chain_detail");
+         sql(c, WormAuditDdl.postgres(config));
+         try(var r = s.executeQuery(pairs))
+         {
+            r.next();
+            assertThat(r.getString(1)).isEqualTo("1@1,2@1,3@2,4@3");
+         }
+         assertThat(writer.chainOnce().links()).isZero();
+         assertThat(new WormAuditVerifier(config).verify().getBreaks()).isEmpty();
+
+         sql(c, "ALTER TABLE worm_audit_chain_detail DISABLE TRIGGER ALL; UPDATE worm_audit_chain_detail SET chain_id=1 WHERE detail_id=3;"
+            + " ALTER TABLE worm_audit_chain_detail ENABLE TRIGGER ALL");
+      }
+      assertThat(new WormAuditVerifier(config).verify().getBreaks()).anyMatch(b -> b.reason().contains("audit_detail 3 has a detail coverage row that disagrees"));
+   }
+
+
+
+   /*******************************************************************************
     ** Referential integrity guardrail: every table reference of the WORM tables
     ** (possible-value fields, and the chain's audit header) has a RESTRICT
     ** foreign key, or an exemption with its reason. Nothing may cascade into or
@@ -611,7 +679,9 @@ class PostgresAcceptanceTest
          "worm_audit_verification.from_link_id", links,
          "worm_audit_verification.to_link_id", links,
          "worm_audit_verification.first_break_link_id", links + "; a break may name a link that is missing",
-         "worm_audit_purge.anchor_link_id", "the anchor is the last link the same purge deleted");
+         "worm_audit_purge.anchor_link_id", "the anchor is the last link the same purge deleted",
+         "worm_audit_chain_detail.chain_id", "the chain is WORM: the owner has no UPDATE, so a foreign key check into it is denied;"
+            + " the coverage trigger writes the row with its link and the purge deletes it first");
 
       java.util.Set<String> references = new java.util.TreeSet<>(List.of("worm_audit_chain.audit_id"));
       for(var table : instance.getTables().values())

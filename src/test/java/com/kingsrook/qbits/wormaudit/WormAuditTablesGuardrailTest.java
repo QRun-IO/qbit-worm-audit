@@ -62,6 +62,7 @@ class WormAuditTablesGuardrailTest
     *******************************************************************************/
    static final Map<String, String> STARTS_EMPTY = Map.of(
       WormAuditTables.CHAIN, "log: the chain job links each settled audit record",
+      WormAuditTables.CHAIN_DETAIL, "log: the chain trigger (or writer) records each detail a new link covers",
       WormAuditTables.CHECKPOINT, "log: the chain job signs a range every N links or minutes",
       WormAuditTables.EXPORT, "log: the daily export or Export now seals a range",
       WormAuditTables.VERIFICATION, "log: every verification run, manual or daily",

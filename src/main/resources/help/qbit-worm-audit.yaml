@@ -24,6 +24,11 @@ entries:
     content: |
       **How rows get created:** the Chain settled audit records job appends links for audit records older than the settle horizon (every 30 seconds by default, set in Settings). Nobody adds, edits or deletes a link; the database refuses. An empty table means no audit record has settled yet, or the chain job is not running.
 
+  - key: table:worm_audit_chain_detail;slot:help
+    summary: "Which chain link covers each audit detail: one row per detail, written with the link."
+    content: |
+      **How rows get created:** whenever the chain job appends a link, the database writes one row here for every audit detail the link covers, in the same transaction (the database script also fills it for links that existed before this table). It lets the chain job find details that are not chained yet without scanning the chain. Nobody adds, edits or deletes a row; the database refuses, and verification checks that it matches the chain exactly. An empty table means no audit detail has been chained yet.
+
   - key: table:worm_audit_checkpoint;slot:help
     summary: "Signed ranges of links (Ed25519), proving the chain's head at a point in time."
     content: |
