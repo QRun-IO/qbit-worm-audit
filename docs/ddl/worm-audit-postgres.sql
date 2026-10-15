@@ -385,3 +385,154 @@ BEGIN
    END LOOP;
 END;
 $$;
+
+-- changeset worm-audit:13 splitStatements:false
+-- comment: Normalized detail coverage. One insert-only row per audit_detail id covered by a chain link, written by the coverage trigger in the same statement as the link, so the chain writer probes a primary key instead of the GIN array index. Append-only like the chain, with no foreign keys (the owner cannot UPDATE WORM tables, so FK checks would be denied). The advisory lock keeps a running chainer from appending between the backfill and the new trigger body.
+DO $$
+BEGIN
+   PERFORM pg_advisory_xact_lock(86753090421);
+END;
+$$;
+CREATE TABLE IF NOT EXISTS public.worm_audit_chain_detail (
+   detail_id bigint PRIMARY KEY,
+   chain_id bigint NOT NULL,
+   CHECK (detail_id >= 0),
+   CHECK (chain_id > 0)
+);
+CREATE INDEX IF NOT EXISTS worm_audit_chain_detail_chain ON public.worm_audit_chain_detail(chain_id);
+-- The first link wins if a tampered chain covers a detail twice; the verifier still reports the duplicate from the chain itself.
+INSERT INTO public.worm_audit_chain_detail(detail_id, chain_id)
+   SELECT x.id::bigint, c.id FROM public.worm_audit_chain c CROSS JOIN LATERAL unnest(string_to_array(c.detail_ids, ',')) AS x(id)
+   WHERE c.detail_ids <> '' ORDER BY c.id
+   ON CONFLICT (detail_id) DO NOTHING;
+
+CREATE OR REPLACE FUNCTION public.worm_audit_reject() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp SET timezone = 'UTC' AS $fn$
+DECLARE
+   old_time timestamptz;
+   function_owner name;
+   stack text;
+   row_identity text := 'all';
+BEGIN
+   IF TG_OP = 'DELETE' AND current_setting('worm_audit.purging', true) = 'on' THEN
+      SELECT pg_get_userbyid(proowner) INTO function_owner FROM pg_proc
+         WHERE oid = 'public.worm_audit_purge(timestamptz)'::regprocedure;
+      GET DIAGNOSTICS stack = PG_CONTEXT;
+      IF current_user = function_owner AND position('function worm_audit_purge(timestamp with time zone)' in stack) > 0 THEN
+         IF TG_RELID = '"audit"'::regclass THEN
+            old_time := OLD.timestamp;
+         ELSIF TG_RELID = '"audit_detail"'::regclass THEN
+            SELECT timestamp INTO old_time FROM "audit" WHERE id = OLD.audit_id;
+         ELSIF TG_RELID = 'public.worm_audit_chain'::regclass THEN
+            SELECT timestamp INTO old_time FROM "audit" WHERE id = OLD.audit_id;
+         ELSIF TG_RELID = 'public.worm_audit_chain_detail'::regclass THEN
+            SELECT a.timestamp INTO old_time FROM public.worm_audit_chain c JOIN "audit" a ON a.id = c.audit_id WHERE c.id = OLD.chain_id;
+         END IF;
+         IF old_time < now() - interval '6 years' THEN
+            RETURN OLD;
+         END IF;
+      END IF;
+   END IF;
+   IF TG_LEVEL = 'ROW' THEN
+      -- Record fields resolve per statement, so each table's key is read in its own branch.
+      IF TG_RELID = 'public.worm_audit_chain_detail'::regclass THEN
+         row_identity := OLD.detail_id::text;
+      ELSE
+         row_identity := OLD.id::text;
+      END IF;
+   END IF;
+   RAISE EXCEPTION USING ERRCODE = 'P0001',
+      MESSAGE = format('worm_audit: audit rows are write-once; %s of "%s" is not allowed (id=%s). Expired rows are removed only by worm_audit_purge().',
+         TG_OP, TG_TABLE_NAME, row_identity),
+      HINT = 'see qbit-worm-audit docs/DESIGN.md section 4';
+END;
+$fn$;
+
+CREATE OR REPLACE FUNCTION public.worm_audit_detail_coverage() RETURNS trigger
+LANGUAGE plpgsql SET search_path = pg_catalog, public, pg_temp AS $fn$
+BEGIN
+   -- Serialize even direct SQL appends, then record coverage in the same statement as the link.
+   -- The primary key rejects a detail covered twice, within this link or by an earlier one. The
+   -- previous EXISTS overlap check ran as a cached generic plan that chose a sequential scan of
+   -- the whole chain for every inserted link.
+   PERFORM pg_advisory_xact_lock(86753090421);
+   IF NEW.detail_ids = '' THEN
+      RETURN NEW;
+   END IF;
+   BEGIN
+      INSERT INTO public.worm_audit_chain_detail(detail_id, chain_id)
+         SELECT d, NEW.id FROM unnest(string_to_array(NEW.detail_ids, ',')::bigint[]) AS d;
+   EXCEPTION WHEN unique_violation THEN
+      RAISE EXCEPTION USING ERRCODE = '23505', MESSAGE = 'worm_audit: audit detail is already covered by the chain';
+   END;
+   RETURN NEW;
+END;
+$fn$;
+
+-- The array index worm_audit_chain_detail_coverage is no longer used by this release. It stays until a later
+-- changeset drops it, so a previous-release writer still running during a rolling deploy keeps its indexed probe.
+
+DROP TRIGGER IF EXISTS worm_audit_row_guard ON public.worm_audit_chain_detail;
+CREATE TRIGGER worm_audit_row_guard BEFORE UPDATE OR DELETE ON public.worm_audit_chain_detail
+   FOR EACH ROW EXECUTE FUNCTION public.worm_audit_reject();
+DROP TRIGGER IF EXISTS worm_audit_truncate_guard ON public.worm_audit_chain_detail;
+CREATE TRIGGER worm_audit_truncate_guard BEFORE TRUNCATE ON public.worm_audit_chain_detail
+   FOR EACH STATEMENT EXECUTE FUNCTION public.worm_audit_reject();
+REVOKE UPDATE, DELETE, TRUNCATE ON public.worm_audit_chain_detail FROM "app";
+GRANT SELECT, INSERT ON public.worm_audit_chain_detail TO "app";
+
+-- Same function as worm-audit:5, except that coverage rows are locked and purged before their links.
+CREATE OR REPLACE FUNCTION public.worm_audit_purge(p_cutoff timestamptz) RETURNS void
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp SET timezone = 'UTC' AS $fn$
+DECLARE
+   boundary bigint;
+   smaller bigint;
+   anchor text;
+   audits_count bigint;
+   details_count bigint;
+   links_count bigint;
+BEGIN
+   IF p_cutoff IS NULL OR p_cutoff > now() - interval '6 years' THEN
+      INSERT INTO public.worm_audit_purge(requested_at, requested_by, cutoff, retention_interval, outcome, reason)
+         VALUES(now(), session_user, p_cutoff, '6 years', 'REFUSED', 'Cutoff is within retention or null');
+      RETURN;
+   END IF;
+   -- Same lock as the Java chainer; table locks also exclude concurrent audit inserts.
+   PERFORM pg_advisory_xact_lock(86753090421);
+   LOCK TABLE "audit", "audit_detail", public.worm_audit_chain, public.worm_audit_chain_detail IN SHARE ROW EXCLUSIVE MODE;
+   SELECT coalesce(min(c.id) - 1, (SELECT max(id) FROM public.worm_audit_chain)) INTO boundary
+      FROM public.worm_audit_chain c LEFT JOIN "audit" a ON a.id = c.audit_id
+      WHERE a.id IS NULL OR a.timestamp IS NULL OR a.timestamp >= p_cutoff;
+   -- Shrink to a prefix closed over every audit's links AND all its stored details.
+   LOOP
+      SELECT min(c.id) - 1 INTO smaller FROM public.worm_audit_chain c
+         WHERE c.id <= boundary AND (
+            EXISTS (SELECT FROM public.worm_audit_chain later WHERE later.audit_id = c.audit_id AND later.id > boundary)
+            OR EXISTS (SELECT FROM "audit_detail" d WHERE d.audit_id = c.audit_id AND NOT EXISTS (
+               SELECT FROM public.worm_audit_chain covered WHERE covered.audit_id = c.audit_id
+                  AND d.id::text = ANY(string_to_array(covered.detail_ids, ',')))));
+      EXIT WHEN smaller IS NULL;
+      boundary := smaller;
+   END LOOP;
+   SELECT link_hash INTO anchor FROM public.worm_audit_chain WHERE id = boundary;
+   IF anchor IS NULL THEN
+      INSERT INTO public.worm_audit_purge(requested_at, requested_by, cutoff, retention_interval, outcome, reason)
+         VALUES(now(), session_user, p_cutoff, '6 years', 'REFUSED', 'No complete expired chain prefix');
+      RETURN;
+   END IF;
+   PERFORM set_config('worm_audit.purging', 'on', true);
+   DELETE FROM "audit_detail" d WHERE EXISTS
+      (SELECT FROM public.worm_audit_chain c WHERE c.audit_id = d.audit_id AND c.id <= boundary);
+   GET DIAGNOSTICS details_count = ROW_COUNT;
+   -- Coverage rows go before their links: the guard finds their age through the link.
+   DELETE FROM public.worm_audit_chain_detail WHERE chain_id <= boundary;
+   -- Keep ids locally because links must be deleted before their audit headers.
+   WITH removed AS (DELETE FROM public.worm_audit_chain WHERE id <= boundary RETURNING audit_id),
+      removed_audits AS (DELETE FROM "audit" WHERE id IN (SELECT audit_id FROM removed) RETURNING id)
+      SELECT (SELECT count(*) FROM removed), (SELECT count(*) FROM removed_audits) INTO links_count, audits_count;
+   PERFORM set_config('worm_audit.purging', 'off', true);
+   INSERT INTO public.worm_audit_purge(requested_at, requested_by, cutoff, retention_interval, outcome,
+      audits_deleted, details_deleted, links_deleted, anchor_link_id, anchor_hash)
+      VALUES(now(), session_user, p_cutoff, '6 years', 'PURGED', audits_count, details_count, links_count, boundary, anchor);
+END;
+$fn$;

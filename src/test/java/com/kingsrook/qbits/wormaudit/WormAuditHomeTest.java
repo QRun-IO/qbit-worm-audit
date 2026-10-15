@@ -270,7 +270,7 @@ class WormAuditHomeTest
       assertThat(instance.getApp("evidence").getWidgets()).containsExactly(WormAuditApp.HOME_WIDGET);
       assertThat(instance.getApp("evidence").getChildren()).extracting(c -> c.getName()).containsExactlyElementsOf(WormAuditTables.NAV);
       assertThat(instance.getApp("evidence").getChildren()).extracting(c -> c.getLabel())
-         .containsExactly("Verifications", "Sealed Exports", "Checkpoints", "Audit Chain", "Purges", "Settings");
+         .containsExactly("Verifications", "Sealed Exports", "Checkpoints", "Audit Chain", "Detail Coverage", "Purges", "Settings");
       assertThat(instance.getWidget(WormAuditApp.HOME_WIDGET).getGridColumns()).isEqualTo(12);
       assertThat(instance.getWidget(WormAuditApp.HOME_WIDGET).getIsCard()).isFalse();
       assertThat(instance.getWidget(WormAuditApp.HEALTH_CARD_WIDGET).getIsCard()).isTrue();

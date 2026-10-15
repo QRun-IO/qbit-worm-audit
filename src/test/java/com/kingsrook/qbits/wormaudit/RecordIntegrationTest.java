@@ -53,7 +53,7 @@ class RecordIntegrationTest
    {
       var instance = init(new WormAuditQBitConfig());
       Map<String, String> formats = Map.of(
-         WormAuditTables.CHAIN, "Link #%s", WormAuditTables.CHECKPOINT, "Checkpoint #%s",
+         WormAuditTables.CHAIN, "Link #%s", WormAuditTables.CHAIN_DETAIL, "Detail #%s (link %s)", WormAuditTables.CHECKPOINT, "Checkpoint #%s",
          WormAuditTables.EXPORT, "Export #%s (links %s–%s)", WormAuditTables.VERIFICATION, "Verification #%s (%s)",
          WormAuditTables.PURGE, "Purge #%s (%s)", WormAuditTables.SETTINGS, "WORM Audit Settings");
       for(String name : WormAuditTables.ALL)

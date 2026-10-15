@@ -52,13 +52,14 @@ import com.kingsrook.qqq.backend.module.rdbms.model.metadata.RDBMSTableBackendDe
 public final class WormAuditTables
 {
    public static final String CHAIN = "worm_audit_chain";
+   public static final String CHAIN_DETAIL = "worm_audit_chain_detail";
    public static final String CHECKPOINT = "worm_audit_checkpoint";
    public static final String EXPORT = "worm_audit_export";
    public static final String VERIFICATION = "worm_audit_verification";
    public static final String PURGE = "worm_audit_purge";
    public static final String SETTINGS = "worm_audit_settings";
-   public static final List<String> ALL = List.of(CHAIN, CHECKPOINT, EXPORT, VERIFICATION, PURGE, SETTINGS);
-   public static final List<String> NAV = List.of(VERIFICATION, EXPORT, CHECKPOINT, CHAIN, PURGE, SETTINGS);
+   public static final List<String> ALL = List.of(CHAIN, CHAIN_DETAIL, CHECKPOINT, EXPORT, VERIFICATION, PURGE, SETTINGS);
+   public static final List<String> NAV = List.of(VERIFICATION, EXPORT, CHECKPOINT, CHAIN, CHAIN_DETAIL, PURGE, SETTINGS);
 
    /*******************************************************************************
     ** Utility class.
@@ -75,6 +76,9 @@ public final class WormAuditTables
    {
       List<QTableMetaData> tables = new ArrayList<>();
       tables.add(table(config, CHAIN, "Audit Chain Link", "id:L kind:S audit_id:L detail_ids:T prev_hash:S link_hash:S chained_at:D"));
+      // Keyed by the covered audit_detail id: one row per detail, written with its link.
+      tables.add(table(config, CHAIN_DETAIL, "Detail Coverage", "detail_id:L chain_id:L").withPrimaryKeyField("detail_id")
+         .withRecordLabelFormatAndFields("Detail #%s (link %s)", "detail_id", "chain_id"));
       tables.add(table(config, CHECKPOINT, "Checkpoint", "id:L from_link_id:L to_link_id:L link_count:L head_hash:S merkle_root:S algorithm:S key_id:S public_key:T signature:T created_at:D"));
       tables.add(table(config, EXPORT, "Sealed Export", "id:L from_link_id:L to_link_id:L from_checkpoint_id:L to_checkpoint_id:L bucket_alias:S object_prefix:T object_versions:T manifest_key:T manifest_sha256:S prev_manifest_sha256:S object_count:L byte_count:L lock_mode:S retain_until:D sealed_at:D"));
       tables.add(table(config, VERIFICATION, "Verification", "id:L kind:S trigger:S started_at:D finished_at:D from_link_id:L to_link_id:L links_checked:L outcome:S break_count:L first_break_link_id:L first_break_audit_id:L first_break_reason:T export_id:L run_by:S"));
@@ -167,7 +171,7 @@ public final class WormAuditTables
          };
          table.withField(new QFieldMetaData(parts[0], type).withBackendName(parts[0]).withLabel(fieldLabel(parts[0])));
       }
-      for(String reference : List.of("from_link_id", "to_link_id", "first_break_link_id", "anchor_link_id"))
+      for(String reference : List.of("from_link_id", "to_link_id", "first_break_link_id", "anchor_link_id", "chain_id"))
       {
          if(table.getFields().containsKey(reference))
          {
@@ -239,6 +243,7 @@ public final class WormAuditTables
       {
          case SETTINGS -> "Settings";
          case CHAIN -> "Audit Chain";
+         case CHAIN_DETAIL -> "Detail Coverage";
          case CHECKPOINT -> "Checkpoints";
          case EXPORT -> "Sealed Exports";
          case VERIFICATION -> "Verifications";
@@ -258,6 +263,8 @@ public final class WormAuditTables
          case "kind" -> "Kind";
          case "audit_id" -> "Audit";
          case "detail_ids" -> "Detail ids";
+         case "detail_id" -> "Audit detail";
+         case "chain_id" -> "Link";
          case "prev_hash" -> "Previous hash";
          case "link_hash" -> "Link hash";
          case "chained_at" -> "Chained";
