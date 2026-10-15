@@ -167,6 +167,9 @@ class CanonicalAndCryptoTest
                   java.nio.file.Files.readString(
                         java.nio.file.Path.of("docs/ddl/worm-audit-postgres.sql")));
       assertThat(sql).doesNotContain("${");
+      // Liquibase parses every line starting with "-- changeset" as a directive, comments included.
+      assertThat(sql.lines().filter(line -> line.startsWith("-- changeset")))
+            .allMatch(line -> line.matches("-- changeset worm-audit:[0-9]+( splitStatements:false)?"));
       assertThat(sql).contains("GET DIAGNOSTICS stack = PG_CONTEXT", "function worm_audit_purge(timestamp with time zone)", "SET timezone = 'UTC'");
       // The documented migration contract deliberately uses physical snake_case columns.
       assertThat(sql).contains("OLD.audit_id", "OLD.timestamp", "NEW.name", "GRANT UPDATE (label, create_date, modify_date)");
