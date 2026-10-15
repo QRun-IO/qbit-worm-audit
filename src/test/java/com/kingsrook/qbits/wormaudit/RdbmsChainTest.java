@@ -23,6 +23,7 @@ package com.kingsrook.qbits.wormaudit;
 import java.sql.DriverManager;
 import java.util.Map;
 import java.util.UUID;
+import com.kingsrook.qbits.wormaudit.chain.SweepFloors;
 import com.kingsrook.qbits.wormaudit.chain.WormAuditChainer;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
 import com.kingsrook.qbits.wormaudit.verify.WormAuditVerifier;
@@ -209,4 +210,55 @@ class RdbmsChainTest
       }
    }
 
+
+   /*******************************************************************************
+    ** Without a coverage trigger the writer records coverage itself, and the
+    ** sweep floors advance only past settled ids: a later header and a late
+    ** detail for an old, already chained header are both still chained.
+    *******************************************************************************/
+   @Test
+   void coverageRowsAndSweepFloors() throws Exception
+   {
+      String url = "jdbc:h2:mem:floors_" + UUID.randomUUID() + ";DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE";
+      var config = new WormAuditQBitConfig().withBatchSize(500);
+      var instance = RdbmsTestSupport.instance(url, "sa", "", config, false);
+      try(var connection = DriverManager.getConnection(url, "sa", ""); var statement = connection.createStatement())
+      {
+         RdbmsTestSupport.createTables(connection, instance, false);
+         QContext.init(instance, new QSession());
+         lookups();
+         statement.execute("INSERT INTO audit(id,audit_table_id,audit_user_id,timestamp) VALUES(1,1,1,CURRENT_TIMESTAMP - INTERVAL '2' MINUTE)");
+         detail(10, 1);
+         detail(20, 1);
+         var writer = new WormAuditChainer(config);
+         var floors = SweepFloors.of(config);
+         var now = java.time.Instant.now();
+         assertThat(writer.chainOnce(now).audits()).isEqualTo(1);
+         assertThat(STORE.query(WormAuditTables.CHAIN_DETAIL, new com.kingsrook.qqq.backend.core.model.actions.tables.query.QQueryFilter())).extracting(r -> r.getValueLong("detail_id") + "@" + r.getValueLong("chain_id"))
+            .containsExactlyInAnyOrder("10@1", "20@1");
+         assertThat(floors.audit()).isZero();
+         assertThat(writer.chainOnce(now.plusSeconds(600)).links()).isZero();
+         assertThat(floors.audit()).isEqualTo(1);
+         assertThat(floors.detail()).isEqualTo(20);
+         detail(30, 1);
+         statement.execute("INSERT INTO audit(id,audit_table_id,audit_user_id,timestamp) VALUES(2,1,1,CURRENT_TIMESTAMP - INTERVAL '2' MINUTE)");
+         detail(40, 2);
+         var counts = writer.chainOnce(now.plusSeconds(1200));
+         assertThat(counts.audits()).isEqualTo(1);
+         assertThat(counts.lateDetails()).isEqualTo(1);
+         assertThat(STORE.query(WormAuditTables.CHAIN_DETAIL, new com.kingsrook.qqq.backend.core.model.actions.tables.query.QQueryFilter())).hasSize(4);
+         assertThat(writer.chainOnce(now.plusSeconds(1800)).links()).isZero();
+         assertThat(floors.audit()).isEqualTo(2);
+         assertThat(floors.detail()).isEqualTo(40);
+         // A detail whose id sits below the floor (its transaction committed very late)
+         // is skipped by floored ticks and chained by the next hourly full sweep.
+         statement.execute("INSERT INTO audit_detail(id,audit_id,field_name,new_value) VALUES(5,2,'title','late')");
+         assertThat(writer.chainOnce(now.plusSeconds(2400)).lateDetails()).isZero();
+         assertThat(writer.chainOnce(now.plus(SweepFloors.FULL_SWEEP_EVERY)).lateDetails()).isEqualTo(1);
+         assertThat(new WormAuditVerifier(config).verify().getBreaks()).isEmpty();
+         statement.execute("DELETE FROM worm_audit_chain_detail WHERE detail_id=30");
+         statement.execute("INSERT INTO worm_audit_chain_detail(detail_id,chain_id) VALUES(30,1)");
+         assertThat(new WormAuditVerifier(config).verify().getBreaks()).anyMatch(b -> b.reason().contains("audit_detail 30 has a detail coverage row that disagrees"));
+      }
+   }
 }

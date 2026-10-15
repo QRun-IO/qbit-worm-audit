@@ -6,6 +6,10 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 
 ### Fixed
 
+- Chain writer database load. Each 30-second tick re-read the whole late-detail lookback (24 h of `audit_detail`) and probed the GIN array index once per detail (18.4 s and 1.78M buffer hits per tick on a 120k-detail production database), and re-scanned every settled audit header for the unchained anti-join. Coverage now lives in `worm_audit_chain_detail` (`worm-audit:13`): one insert-only row per covered detail, written by the chain trigger in the same statement as its link and backfilled from the existing chain, so the late-detail check is a primary-key probe. Each tick also reads only ids above per-JVM sweep floors (rows settled since the last complete sweep); after a restart and once an hour a tick sweeps everything, as before. Link hash inputs, `detail_ids`, the verifier and exports are unchanged.
+- The chain trigger's overlap check (`EXISTS ... && ...`) ran as a cached generic plan that sequentially scanned all of `worm_audit_chain` for every inserted link (55k sequential scans, 1.2B tuples read in production, about 80 ms per link and growing). The trigger now inserts the coverage rows and lets their primary key reject a detail covered twice.
+- Verification counts detail coverage by aggregating the chain's own detail lists once instead of one index probe per detail, and breaks when the coverage table disagrees with the chain.
+
 - Startup on hosts whose default authentication requires a token (OAuth2, Auth0): `produce()` read the settings singleton under a plain tokenless `QSession`, which failed session validation (`JWTDecodeException: The token is null`) and stopped the host. The startup read now runs as the core `QSystemUserSession`, still honoring the persisted schedules. `TokenRequiredHostTest` runs production under a token-required test authentication module.
 
 ### Added

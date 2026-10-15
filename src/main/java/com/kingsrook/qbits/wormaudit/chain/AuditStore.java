@@ -68,9 +68,21 @@ import com.kingsrook.qqq.backend.module.rdbms.model.metadata.RDBMSTableBackendDe
  *******************************************************************************/
 public class AuditStore
 {
+   /*******************************************************************************
+    ** Every (detail id, link id) pair the chain's own detail lists cover.
+    *******************************************************************************/
+   private static final String CHAIN_PAIRS = "SELECT x.id::bigint AS detail_id, c.id AS chain_id FROM worm_audit_chain c"
+      + " CROSS JOIN LATERAL unnest(string_to_array(c.detail_ids, ',')) AS x(id) WHERE c.detail_ids <> ''";
+
+   /*******************************************************************************
+    ** Chain coverage counted per detail id, aggregated in one pass.
+    *******************************************************************************/
+   private static final String CHAIN_COVERAGE = "SELECT detail_id AS id, count(*) AS n FROM (" + CHAIN_PAIRS + ") pairs GROUP BY detail_id";
+
    private final QBackendTransaction transaction;
    private final Map<String, String> names = new LinkedHashMap<>(16, 0.75F, true);
    private Boolean timestampWithZone;
+   private Boolean postgres;
 
 
    /*******************************************************************************
@@ -269,11 +281,22 @@ public class AuditStore
     *******************************************************************************/
    public List<QRecord> unchained(Instant cutoff, int limit) throws QException
    {
+      return (unchained(cutoff, limit, 0L));
+   }
+
+
+   /*******************************************************************************
+    ** Settled unchained headers above a swept audit id floor (RDBMS only); every
+    ** settled header at or below the floor is already known to be chained.
+    *******************************************************************************/
+   public List<QRecord> unchained(Instant cutoff, int limit, long floor) throws QException
+   {
       if(isRdbms())
       {
-         String sql = "SELECT a." + column("audit", "id") + " FROM " + physical("audit") + " a WHERE a." + column("audit", "timestamp")
-            + " < ?" + unchainedPredicate() + " ORDER BY a." + column("audit", "timestamp") + ", a." + column("audit", "id") + " LIMIT " + limit;
-         Map<Long, QRecord> rows = index(in("audit", "id", sqlIds(sql, cutoff)));
+         String sql = "SELECT a." + column("audit", "id") + " FROM " + physical("audit") + " a WHERE a." + column("audit", "id") + " > ? AND a."
+            + column("audit", "timestamp") + " < ?" + unchainedPredicate() + " ORDER BY a." + column("audit", "timestamp") + ", a." + column("audit", "id")
+            + " LIMIT " + limit;
+         Map<Long, QRecord> rows = index(in("audit", "id", sqlIds(sql, floor, cutoff)));
          return (rows.values().stream().sorted(Comparator.comparing((QRecord r) -> r.getValueInstant("timestamp"))
             .thenComparing(r -> r.getValueLong("id"))).toList());
       }
@@ -381,14 +404,25 @@ public class AuditStore
     *******************************************************************************/
    public List<QRecord> lateDetails(Instant cutoff, int hours, int limit) throws QException
    {
+      return (lateDetails(cutoff, hours, limit, 0L));
+   }
+
+
+   /*******************************************************************************
+    ** Uncovered details above a swept detail id floor (RDBMS only). Coverage is a
+    ** primary-key probe of the normalized coverage table, never an array scan.
+    *******************************************************************************/
+   public List<QRecord> lateDetails(Instant cutoff, int hours, int limit, long floor) throws QException
+   {
       if(isRdbms())
       {
-         String sql = "SELECT d." + column("auditDetail", "id") + " FROM " + physical("auditDetail") + " d JOIN " + physical("audit")
+         String detailId = "d." + column("auditDetail", "id");
+         String sql = "SELECT " + detailId + " FROM " + physical("auditDetail") + " d JOIN " + physical("audit")
             + " a ON a." + column("audit", "id") + "=d." + column("auditDetail", "auditId")
-            + " WHERE a." + column("audit", "timestamp") + " < ? AND a." + column("audit", "timestamp") + " >= ?"
+            + " WHERE " + detailId + " > ? AND a." + column("audit", "timestamp") + " < ? AND a." + column("audit", "timestamp") + " >= ?"
             + " AND EXISTS (SELECT 1 FROM worm_audit_chain h WHERE h.kind='AUDIT' AND h.audit_id=a." + column("audit", "id") + ")"
-            + " AND NOT EXISTS (SELECT 1 FROM worm_audit_chain c WHERE " + containsDetail() + ") ORDER BY d." + column("auditDetail", "id") + " LIMIT " + limit;
-         return (in("auditDetail", "id", sqlIds(sql, cutoff, cutoff.minusSeconds(hours * 3600L))));
+            + " AND NOT EXISTS (SELECT 1 FROM " + WormAuditTables.CHAIN_DETAIL + " x WHERE x.detail_id=" + detailId + ") ORDER BY " + detailId + " LIMIT " + limit;
+         return (in("auditDetail", "id", sqlIds(sql, floor, cutoff, cutoff.minusSeconds(hours * 3600L))));
       }
       List<QRecord> links = all(WormAuditTables.CHAIN);
       Set<Long> headers = links.stream().filter(r -> "AUDIT".equals(r.getValueString("kind"))).map(r -> r.getValueLong("audit_id")).collect(Collectors.toSet());
@@ -409,11 +443,89 @@ public class AuditStore
       String time = "a." + column("audit", "timestamp");
       String headers = "SELECT " + auditId + " AS id, (SELECT count(*) FROM worm_audit_chain c WHERE c.kind='AUDIT' AND c.audit_id=" + auditId
          + ") AS coverage FROM " + physical("audit") + " a WHERE " + time + " < ? OR " + time + " IS NULL";
-      String details = "SELECT d." + column("auditDetail", "id") + " AS id, (SELECT count(*) FROM worm_audit_chain c WHERE " + containsDetail()
-         + ") AS coverage FROM " + physical("auditDetail") + " d LEFT JOIN " + physical("audit") + " a ON " + auditId + "=d."
-         + column("auditDetail", "auditId") + " WHERE " + time + " < ? OR " + time + " IS NULL";
+      String detailId = "d." + column("auditDetail", "id");
+      String scope = " FROM " + physical("auditDetail") + " d LEFT JOIN " + physical("audit") + " a ON " + auditId + "=d."
+         + column("auditDetail", "auditId");
+      String details;
+      if(isPostgres())
+      {
+         ///////////////////////////////////////////////////////////////////////
+         // Count coverage from the chain itself (the hashed source of truth), //
+         // aggregating every link's ids once rather than probing per detail.  //
+         ///////////////////////////////////////////////////////////////////////
+         details = "SELECT " + detailId + " AS id, coalesce(cv.n, 0) AS coverage" + scope + " LEFT JOIN (" + CHAIN_COVERAGE
+            + ") cv ON cv.id=" + detailId + " WHERE " + time + " < ? OR " + time + " IS NULL";
+      }
+      else
+      {
+         details = "SELECT " + detailId + " AS id, (SELECT count(*) FROM worm_audit_chain c WHERE POSITION(',' || CAST(" + detailId
+            + " AS varchar) || ',' IN ',' || c.detail_ids || ',') > 0) AS coverage" + scope + " WHERE " + time + " < ? OR " + time + " IS NULL";
+      }
       reportCoverage(headers, "audit", cutoff, result);
       reportCoverage(details, "audit_detail", cutoff, result);
+      coverageTable(result);
+   }
+
+
+   /*******************************************************************************
+    ** The coverage table must hold exactly the chain's own detail lists. A
+    ** mismatch would let the writer skip or re-chain a detail, so it is a break.
+    *******************************************************************************/
+   private void coverageTable(VerificationResult result) throws QException
+   {
+      String table = "SELECT detail_id, chain_id FROM " + WormAuditTables.CHAIN_DETAIL;
+      String sql = isPostgres()
+         ? "SELECT detail_id, count(*) OVER() FROM ((" + CHAIN_PAIRS + " EXCEPT " + table + ") UNION ALL (" + table + " EXCEPT " + CHAIN_PAIRS
+            + ")) mismatch ORDER BY detail_id LIMIT 100"
+         : "SELECT x.detail_id, count(*) OVER() FROM " + WormAuditTables.CHAIN_DETAIL + " x WHERE NOT EXISTS (SELECT 1 FROM worm_audit_chain c"
+            + " WHERE c.id=x.chain_id AND POSITION(',' || CAST(x.detail_id AS varchar) || ',' IN ',' || c.detail_ids || ',') > 0) ORDER BY x.detail_id LIMIT 100";
+      try(PreparedStatement statement = ((RDBMSTransaction) transaction).getConnection().prepareStatement(sql); ResultSet rows = statement.executeQuery())
+      {
+         long total = 0;
+         int reported = 0;
+         while(rows.next())
+         {
+            total = rows.getLong(2);
+            result.add(null, null, "audit_detail " + com.kingsrook.qbits.wormaudit.verify.WormAuditVerifier.number(rows.getLong(1))
+               + " has a detail coverage row that disagrees with the chain");
+            reported++;
+         }
+         result.omitted(total - reported);
+      }
+      catch(Exception e)
+      {
+         throw (AppendOnlyGuard.map(e));
+      }
+   }
+
+
+   /*******************************************************************************
+    ** Highest id in a core audit table, or 0 when it is empty (RDBMS only).
+    *******************************************************************************/
+   public long maxId(String table) throws QException
+   {
+      return (sqlIds("SELECT coalesce(max(" + column(table, "id") + "), 0) FROM " + physical(table)).getFirst());
+   }
+
+
+   /*******************************************************************************
+    ** PostgreSQL maintains detail coverage in its chain trigger; other backends
+    ** have no trigger, so the writer appends coverage rows itself.
+    *******************************************************************************/
+   public boolean isPostgres() throws QException
+   {
+      if(postgres == null)
+      {
+         try
+         {
+            postgres = isRdbms() && "PostgreSQL".equals(((RDBMSTransaction) transaction).getConnection().getMetaData().getDatabaseProductName());
+         }
+         catch(Exception e)
+         {
+            throw (AppendOnlyGuard.map(e));
+         }
+      }
+      return (postgres);
    }
 
 
@@ -453,36 +565,22 @@ public class AuditStore
 
 
    /*******************************************************************************
-    ** PostgreSQL's containment expression matches the GIN expression index.
+    ** Read ids from an anti-join, binding instants by column type and ids as longs.
     *******************************************************************************/
-   private String containsDetail() throws QException
-   {
-      try
-      {
-         String id = "d." + column("auditDetail", "id");
-         if("PostgreSQL".equals(((RDBMSTransaction) transaction).getConnection().getMetaData().getDatabaseProductName()))
-         {
-            return ("string_to_array(c.detail_ids, ',') @> ARRAY[" + id + "::text]");
-         }
-         return ("POSITION(',' || CAST(" + id + " AS varchar) || ',' IN ',' || c.detail_ids || ',') > 0");
-      }
-      catch(Exception e)
-      {
-         throw (AppendOnlyGuard.map(e));
-      }
-   }
-
-
-   /*******************************************************************************
-    ** Read ids from an anti-join, binding all instants according to column type.
-    *******************************************************************************/
-   private List<Long> sqlIds(String sql, Instant... cutoffs) throws QException
+   private List<Long> sqlIds(String sql, Object... parameters) throws QException
    {
       try(PreparedStatement statement = ((RDBMSTransaction) transaction).getConnection().prepareStatement(sql))
       {
-         for(int i = 0; i < cutoffs.length; i++)
+         for(int i = 0; i < parameters.length; i++)
          {
-            bindCutoff(statement, i + 1, cutoffs[i]);
+            if(parameters[i] instanceof Instant instant)
+            {
+               bindCutoff(statement, i + 1, instant);
+            }
+            else
+            {
+               statement.setLong(i + 1, (Long) parameters[i]);
+            }
          }
          List<Long> ids = new ArrayList<>();
          try(ResultSet rows = statement.executeQuery())
