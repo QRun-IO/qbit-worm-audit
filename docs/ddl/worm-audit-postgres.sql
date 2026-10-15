@@ -482,6 +482,16 @@ REVOKE UPDATE, DELETE, TRUNCATE ON public.worm_audit_chain_detail FROM "app";
 GRANT SELECT, INSERT ON public.worm_audit_chain_detail TO "app";
 
 -- Same function as worm-audit:5, except that coverage rows are locked and purged before their links.
+-- The migrating role may have revoked its own EXECUTE (a runtime role that owns the schema, as on CNPG);
+-- PostgreSQL then refuses CREATE OR REPLACE. Grant it back for this statement only, then restore.
+DO $$
+BEGIN
+   IF NOT has_function_privilege(current_user, 'public.worm_audit_purge(timestamptz)', 'EXECUTE') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.worm_audit_purge(timestamptz) TO %I', current_user);
+      PERFORM set_config('worm_audit.purge_regrant', 'on', true);
+   END IF;
+END;
+$$;
 CREATE OR REPLACE FUNCTION public.worm_audit_purge(p_cutoff timestamptz) RETURNS void
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public, pg_temp SET timezone = 'UTC' AS $fn$
 DECLARE
@@ -536,3 +546,11 @@ BEGIN
       VALUES(now(), session_user, p_cutoff, '6 years', 'PURGED', audits_count, details_count, links_count, boundary, anchor);
 END;
 $fn$;
+DO $$
+BEGIN
+   IF current_setting('worm_audit.purge_regrant', true) = 'on' THEN
+      EXECUTE format('REVOKE EXECUTE ON FUNCTION public.worm_audit_purge(timestamptz) FROM %I', current_user);
+      PERFORM set_config('worm_audit.purge_regrant', 'off', true);
+   END IF;
+END;
+$$;
