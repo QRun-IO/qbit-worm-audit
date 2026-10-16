@@ -142,7 +142,8 @@ class ProcessesAndAlertsTest
       assertThat(Sink.raised.getFirst().getDedupKey()).isEqualTo("chain");
       assertThat(Sink.raised.getFirst().getRecordRefs().getFirst().getTableName())
             .isEqualTo(WormAuditTables.VERIFICATION);
-      assertThat(Sink.raised.getFirst().getTitle()).contains("Break at link 1");
+      assertThat(Sink.raised.getFirst().getTitle()).isEqualTo("Audit chain verification found 1 problem");
+      assertThat(Sink.raised.getFirst().getSummary()).contains("Break at link 1");
       var first = STORE.all(WormAuditTables.VERIFICATION).getFirst();
       assertThat(first.getValueLong("first_break_link_id")).isEqualTo(1);
       assertThat(first.getValueLong("first_break_audit_id")).isEqualTo(1);
