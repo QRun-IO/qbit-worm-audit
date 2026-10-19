@@ -21,10 +21,15 @@
 package com.kingsrook.qbits.wormaudit;
 
 import java.util.List;
+import com.kingsrook.qbits.wormaudit.app.WormAuditApp;
+import com.kingsrook.qbits.wormaudit.model.WormAuditHelp;
 import com.kingsrook.qbits.wormaudit.ddl.WormAuditDdl;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
 import com.kingsrook.qbits.wormaudit.processes.WormAuditProcesses;
 import com.kingsrook.qqq.backend.core.model.metadata.QInstance;
+import com.kingsrook.qqq.backend.core.model.metadata.QBackendMetaData;
+import com.kingsrook.qqq.backend.core.model.metadata.layout.QAppMetaData;
+import com.kingsrook.qqq.backend.core.modules.backend.implementations.memory.MemoryBackendModule;
 import com.kingsrook.qqq.backend.core.model.metadata.tables.Capability;
 import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -43,6 +48,7 @@ class WormAuditQBitProducerTest
    {
       var config = new WormAuditQBitConfig();
       QInstance instance = WormAuditTestSupport.init(config);
+      assertThat(config.getIncludeApp()).isTrue();
       assertThat(config.getRetentionYears()).isEqualTo(6);
       assertThat(config.getTableMetaDataCustomizer()).isNull();
       assertThat(config.getSigningKey()).isNull();
@@ -159,5 +165,37 @@ class WormAuditQBitProducerTest
       assertThatThrownBy(
                   () -> WormAuditDdl.resolveNames(new WormAuditQBitConfig(), new QInstance()))
             .isInstanceOf(IllegalArgumentException.class);
+   }
+
+
+   /*******************************************************************************
+    ** Embedded production keeps the host app intact and registers all evidence metadata.
+    *******************************************************************************/
+   @Test
+   void embeddedMetadataPreservesHostApp() throws Exception
+   {
+      var config = new WormAuditQBitConfig().withBackendName("memory").withIncludeApp(false).withAppName("audit");
+      var instance = WormAuditTestSupport.core(new QBackendMetaData().withName("memory").withBackendType(MemoryBackendModule.class));
+      var host = new QAppMetaData().withName("audit").withLabel("Combined Audit").withWidgets(List.of("hostSummary"));
+      instance.addApp(host);
+      new WormAuditQBitProducer().withQBitConfig(config).produce(instance);
+      assertThat(config.getIncludeApp()).isFalse();
+      assertThat(instance.getApp("worm_audit")).isNull();
+      assertThat(instance.getApp("audit")).isSameAs(host);
+      assertThat(host.getLabel()).isEqualTo("Combined Audit");
+      assertThat(host.getWidgets()).containsExactly("hostSummary");
+      assertThat(host.getHelpContent()).isNullOrEmpty();
+      assertThat(instance.getWidget(WormAuditApp.HEALTH_CARD_WIDGET)).isNotNull();
+      assertThat(instance.getWidget(WormAuditApp.HOME_WIDGET)).isNotNull();
+      for(String name : WormAuditTables.ALL)
+      {
+         assertThat(instance.getTable(name).getHelpContent()).containsKey(WormAuditHelp.SLOT);
+         assertThat(instance.getTable(name).getPermissionRules().getPermissionBaseName()).isEqualTo(name);
+      }
+      assertThat(instance.getTable(WormAuditTables.CHAIN).getDisabledCapabilities()).contains(Capability.TABLE_UPDATE, Capability.TABLE_DELETE, Capability.TABLE_INSERT);
+      assertThat(instance.getTable("audit").getDisabledCapabilities()).contains(Capability.TABLE_UPDATE, Capability.TABLE_DELETE);
+      assertThat(instance.getProcess(WormAuditProcesses.VERIFY)).isNotNull();
+      assertThat(instance.getProcess(WormAuditProcesses.CHAIN).getSchedule().getRepeatSeconds()).isEqualTo(config.getChainIntervalSeconds());
+      assertThat(instance.getProcess(WormAuditProcesses.DAILY).getSchedule().getCronExpression()).isEqualTo(config.getVerifyCron());
    }
 }

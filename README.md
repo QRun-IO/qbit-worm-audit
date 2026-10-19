@@ -137,6 +137,12 @@ Open `/app/worm_audit` (or `/app/admin/worm_audit` with `parentAppName="admin"`)
 The full-width `wormAuditHome` HTML widget uses the standard `/qqq/v1/widget` API.
 Hosts can add `wormAuditHealthCard` to their own dashboard. Both widgets and the app
 require read permission on at least one WORM table, using the host's table permission rules.
+To embed WORM in an existing host app, set `withIncludeApp(false)` and configure
+`appName`, `appLabel` and optional `parentAppName` for that host app. The host owns
+its navigation, home widget placement and app help; the qbit does not create or replace
+the app or fill its help. Both widgets and all table help, permissions, guards,
+processes and schedules remain registered. The health card links to the configured
+host app. Standalone app creation remains enabled by default.
 The aggregate home shows only identifiers, counts, times, shortened hashes and reasons;
 it never renders audit messages or field values. Record links retain the target table's permissions.
 
