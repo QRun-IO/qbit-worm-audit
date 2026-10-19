@@ -279,6 +279,29 @@ class WormAuditHomeTest
 
 
    /*******************************************************************************
+    ** Embedded widgets retain direct authorization without a standalone app.
+    *******************************************************************************/
+   @Test
+   void embeddedWidgetsRequireReadPermission() throws Exception
+   {
+      var config = ChainVerificationTest.signed().withIncludeApp(false).withAppName("audit").withAppLabel("Audit");
+      var instance = init(config);
+      assertThat(instance.getApp("worm_audit")).isNull();
+      assertThat(instance.getApp("audit")).isNull();
+      var input = new RenderWidgetInput().withWidgetMetaData(instance.getWidget(WormAuditApp.HEALTH_CARD_WIDGET));
+      QContext.getQSession().withPermissions("admin.hasAccess");
+      assertThatThrownBy(() -> new WormAuditApp.HealthCardRenderer().render(input)).isInstanceOf(QPermissionDeniedException.class);
+      assertThatThrownBy(() -> new WormAuditApp.HomeRenderer().render(input)).isInstanceOf(QPermissionDeniedException.class);
+      QContext.getQSession().withPermissions(WormAuditTables.CHAIN + ".read");
+      String card = ((RawHTML) new WormAuditApp.HealthCardRenderer().render(input).getWidgetData()).getHtml();
+      assertThat(card).contains("href=\"/app/audit\"");
+      assertThat(new WormAuditApp.HomeRenderer().render(input).getWidgetData()).isInstanceOf(RawHTML.class);
+      QContext.setQSession(new QSession());
+      assertThatThrownBy(() -> new WormAuditApp.HealthCardRenderer().render(input)).isInstanceOf(QPermissionDeniedException.class);
+   }
+
+
+   /*******************************************************************************
     ** Exercise the real SQL anti-join without Docker, including its exact boundary.
     *******************************************************************************/
    @Test

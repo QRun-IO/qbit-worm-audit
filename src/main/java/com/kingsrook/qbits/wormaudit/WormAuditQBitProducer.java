@@ -214,7 +214,10 @@ public class WormAuditQBitProducer implements QBitMetaDataProducer<WormAuditQBit
       {
          qInstance.addScheduler(new QuartzSchedulerMetaData().withName(qBitConfig.getSchedulerName()));
       }
-      output.add(WormAuditApp.app(qBitConfig, producedTables));
+      if(qBitConfig.getIncludeApp())
+      {
+         output.add(WormAuditApp.app(qBitConfig, producedTables));
+      }
       for(QWidgetMetaData widget : WormAuditApp.widgets())
       {
          output.add(widget);

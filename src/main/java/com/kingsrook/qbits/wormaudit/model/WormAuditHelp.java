@@ -115,7 +115,7 @@ public final class WormAuditHelp
                table.withHelpContent(SLOT, content(entry.getValue()));
             }
          }
-         else if(key.startsWith("app:"))
+         else if(config.getIncludeApp() && key.startsWith("app:"))
          {
             QAppMetaData app = qInstance.getApp(config.getAppName());
             if(app != null && (app.getHelpContent() == null || !app.getHelpContent().containsKey(SLOT)))

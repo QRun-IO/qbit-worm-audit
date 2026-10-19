@@ -48,6 +48,7 @@ public class WormAuditQBitConfig implements QBitConfig
    private String exportLockMode = "GOVERNANCE";
    private int exportRetentionDays = 30;
    private final WormAuditSettings settings = new WormAuditSettings(this);
+   private boolean includeApp = true;
    private String appName = "worm_audit";
    private String appLabel = "WORM Audit";
    private String parentAppName;
@@ -131,7 +132,26 @@ public class WormAuditQBitConfig implements QBitConfig
 
 
    /*******************************************************************************
-    ** Read the app name.
+    ** Whether to create the standalone app. Widgets remain available when false.
+    *******************************************************************************/
+   public boolean getIncludeApp()
+   {
+      return (includeApp);
+   }
+
+
+   /*******************************************************************************
+    ** Disable standalone app creation when the host owns the Audit app and help.
+    *******************************************************************************/
+   public WormAuditQBitConfig withIncludeApp(boolean includeApp)
+   {
+      this.includeApp = includeApp;
+      return (this);
+   }
+
+
+   /*******************************************************************************
+    ** Read the app name (the host-owned destination when includeApp is false).
     *******************************************************************************/
    public String getAppName()
    {
