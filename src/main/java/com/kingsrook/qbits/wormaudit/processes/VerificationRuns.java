@@ -24,6 +24,7 @@ package com.kingsrook.qbits.wormaudit.processes;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import com.kingsrook.qbits.wormaudit.WormAuditQBitConfig;
 import com.kingsrook.qbits.wormaudit.chain.AuditStore;
 import com.kingsrook.qbits.wormaudit.model.WormAuditTables;
@@ -43,6 +44,11 @@ import com.kingsrook.qqq.backend.core.model.data.QRecord;
  *******************************************************************************/
 public final class VerificationRuns
 {
+   /** How many break reasons the alert summary spells out; the title carries the total. */
+   private static final int ALERT_SUMMARY_REASONS = 3;
+
+
+
    /*******************************************************************************
     ** Utility class.
     *******************************************************************************/
@@ -79,8 +85,15 @@ public final class VerificationRuns
             }
             else
             {
+               long problems = result.getBreakCount();
+               String summary = result.getBreaks().stream().limit(ALERT_SUMMARY_REASONS).map(b -> b.reason()).collect(Collectors.joining("; "));
+               if(problems > ALERT_SUMMARY_REASONS)
+               {
+                  summary += "; and " + (problems - ALERT_SUMMARY_REASONS) + " more";
+               }
                QAlerts.raise(new AlertSignal("wormaudit.chain.break").withDedupKey("chain")
-                  .withTitle(result.getBreaks().getFirst().reason()).withRecordRef(new AlertRecordRef(WormAuditTables.VERIFICATION, row.getValue("id"))));
+                  .withTitle("Audit chain verification found " + problems + (problems == 1 ? " problem" : " problems")).withSummary(summary)
+                  .withRecordRef(new AlertRecordRef(WormAuditTables.VERIFICATION, row.getValue("id"))));
             }
          }
          return (result);
